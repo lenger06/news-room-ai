@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
     settings.validate()
 
     from agents.registry import agent_registry
-    for name in ["researcher", "writer", "script_writer", "producer", "executive_producer"]:
+    for name in ["researcher", "writer", "script_writer", "anchor", "video_editor", "producer", "publisher", "executive_producer"]:
         agent = await agent_registry.get_agent(name)
         logger.info(f"  {'✓' if agent else '✗'} {name}")
 
@@ -96,7 +96,7 @@ async def root():
         "name": "Newsroom AI",
         "version": "1.0.0",
         "status": "running",
-        "workflows": ["RESEARCH_ONLY", "ARTICLE", "FULL_PRODUCTION", "SCRIPT_ONLY"],
+        "workflows": ["RESEARCH_ONLY", "ARTICLE", "FULL_PRODUCTION", "BROADCAST_VIDEO", "SCRIPT_ONLY", "VIDEO_FROM_SCRIPT"],
         "endpoints": {
             "produce": "POST /produce",
             "produce_stream": "POST /produce/stream",
@@ -113,7 +113,7 @@ async def health():
         "status": "healthy",
         "agents": {
             name: ("ready" if agent_registry.get_agent_info(name) else "missing")
-            for name in ["executive_producer", "researcher", "writer", "script_writer", "producer"]
+            for name in ["executive_producer", "researcher", "writer", "script_writer", "anchor", "video_editor", "producer", "publisher"]
         },
     }
 

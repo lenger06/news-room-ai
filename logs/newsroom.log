@@ -1,0 +1,375 @@
+2026-04-04 12:54:01,979 - main - INFO - === Newsroom AI starting up ===
+2026-04-04 12:54:02,080 - watchfiles.main - INFO - 20 changes detected
+2026-04-04 12:54:07,085 - watchfiles.main - INFO - 18 changes detected
+2026-04-04 12:54:09,469 - agents.researcher.agent - INFO - Researcher agent initialized
+2026-04-04 12:54:09,470 - main - INFO -   ✓ researcher
+2026-04-04 12:54:09,491 - agents.writer.agent - INFO - Writer agent initialized
+2026-04-04 12:54:09,492 - main - INFO -   ✓ writer
+2026-04-04 12:54:09,512 - agents.script_writer.agent - INFO - Script Writer agent initialized
+2026-04-04 12:54:09,513 - main - INFO -   ✓ script_writer
+2026-04-04 12:54:09,543 - agents.producer.agent - INFO - Producer agent initialized
+2026-04-04 12:54:09,544 - main - INFO -   ✓ producer
+2026-04-04 12:54:09,613 - watchfiles.main - INFO - 41 changes detected
+2026-04-04 12:54:09,860 - agents.executive_producer.agent - INFO - Executive Producer initialized
+2026-04-04 12:54:09,860 - main - INFO -   ✓ executive_producer
+2026-04-04 12:54:09,866 - main - INFO - === Newsroom AI ready ===
+2026-04-04 12:54:09,981 - watchfiles.main - INFO - 8 changes detected
+2026-04-04 12:56:05,236 - agents.executive_producer.agent - INFO - [EP] Received request: [Current date/time: Saturday, April 04, 2026, 12:56 PM]
+[Current date/time: Saturday, April 4, 2026 at 12:56 PM PDT]
+Pro
+2026-04-04 12:56:06,968 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 12:56:06,981 - agents.executive_producer.agent - INFO - [EP] Workflow: FULL_PRODUCTION, Steps: ['researcher', 'writer', 'script_writer', 'producer'], Topic: Strait of Hormuz
+2026-04-04 12:56:06,983 - agents.executive_producer.agent - INFO - [EP] Executing step 1/4: researcher
+2026-04-04 12:56:08,373 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 12:56:11,110 - tools.web_research_tool - INFO - [web_research_tool] 5 results for: Strait of Hormuz April 2026
+2026-04-04 12:56:12,636 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 12:56:20,211 - agents.executive_producer.agent - INFO - [EP] Executing step 2/4: writer
+2026-04-04 12:56:20,642 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 12:56:21,963 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 12:56:25,209 - tools.file_operations_tool - INFO - [file_ops] Saved output\articles\article_20260404_125625.md (2384 bytes)
+2026-04-04 12:56:25,288 - watchfiles.main - INFO - 1 change detected
+2026-04-04 12:56:25,606 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 12:56:25,821 - agents.executive_producer.agent - INFO - [EP] Executing step 3/4: script_writer
+2026-04-04 12:56:26,595 - watchfiles.main - INFO - 1 change detected
+2026-04-04 12:56:27,565 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 12:56:30,729 - tools.file_operations_tool - INFO - [file_ops] Saved output\scripts\strait_of_hormuz_20260404.md (1684 bytes)
+2026-04-04 12:56:30,782 - watchfiles.main - INFO - 1 change detected
+2026-04-04 12:56:31,656 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 12:56:31,982 - agents.executive_producer.agent - INFO - [EP] Executing step 4/4: producer
+2026-04-04 12:56:32,055 - watchfiles.main - INFO - 1 change detected
+2026-04-04 12:56:33,236 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 12:56:33,750 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 12:56:34,151 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:14:26,259 - watchfiles.main - INFO - 3 changes detected
+2026-04-04 13:14:35,995 - watchfiles.main - INFO - 9 changes detected
+2026-04-04 13:14:36,510 - watchfiles.main - INFO - 30 changes detected
+2026-04-04 13:14:37,125 - watchfiles.main - INFO - 1 change detected
+2026-04-04 13:17:06,930 - watchfiles.main - INFO - 5 changes detected
+2026-04-04 13:17:07,284 - watchfiles.main - INFO - 5 changes detected
+2026-04-04 13:25:22,917 - agents.executive_producer.agent - INFO - [EP] Received request: [Current date/time: Saturday, April 04, 2026, 01:25 PM]
+[Current date/time: Saturday, April 4, 2026 at 01:25 PM PDT]
+eve
+2026-04-04 13:25:24,291 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:25:24,297 - agents.executive_producer.agent - INFO - [EP] Workflow: FULL_PRODUCTION, Steps: ['researcher', 'writer', 'script_writer', 'producer'], Topic: the status of the war in Iran and shipping through the Strait of Hormuz
+2026-04-04 13:25:24,299 - agents.executive_producer.agent - INFO - [EP] Executing step 1/4: researcher
+2026-04-04 13:25:25,228 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:25:27,954 - tools.web_research_tool - INFO - [web_research_tool] 3 results for: status of the war in Iran April 2026
+2026-04-04 13:25:28,757 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:25:31,881 - tools.web_research_tool - INFO - [web_research_tool] 3 results for: shipping through the Strait of Hormuz April 2026
+2026-04-04 13:25:32,422 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:25:37,337 - agents.executive_producer.agent - INFO - [EP] Executing step 2/4: writer
+2026-04-04 13:25:38,770 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:25:43,884 - tools.file_operations_tool - INFO - [file_ops] Saved output\articles\article_20260404_132543.md (2396 bytes)
+2026-04-04 13:25:43,942 - watchfiles.main - INFO - 1 change detected
+2026-04-04 13:25:44,552 - watchfiles.main - INFO - 1 change detected
+2026-04-04 13:25:45,152 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:25:45,282 - agents.executive_producer.agent - INFO - [EP] Executing step 3/4: script_writer
+2026-04-04 13:25:45,667 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:25:49,945 - tools.file_operations_tool - INFO - [file_ops] Saved output\scripts\news_segment_20260404_1325.md (1437 bytes)
+2026-04-04 13:25:50,160 - watchfiles.main - INFO - 1 change detected
+2026-04-04 13:25:50,714 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:25:50,876 - agents.executive_producer.agent - INFO - [EP] Executing step 4/4: producer
+2026-04-04 13:25:51,310 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:25:51,324 - watchfiles.main - INFO - 1 change detected
+2026-04-04 13:25:52,667 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:25:53,271 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:26:31,708 - agents.executive_producer.agent - INFO - [EP] Received request: [Current date/time: Saturday, April 04, 2026, 01:26 PM]
+[Current date/time: Saturday, April 4, 2026 at 01:26 PM PDT]
+sch
+2026-04-04 13:26:32,657 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:26:32,663 - agents.executive_producer.agent - INFO - [EP] Workflow: FULL_PRODUCTION, Steps: ['researcher', 'writer', 'script_writer', 'producer'], Topic: the status of the war in Iran and shipping through the Strait of Hormuz
+2026-04-04 13:26:32,665 - agents.executive_producer.agent - INFO - [EP] Executing step 1/4: researcher
+2026-04-04 13:26:33,272 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:26:36,171 - tools.web_research_tool - INFO - [web_research_tool] 3 results for: war in Iran April 2026
+2026-04-04 13:26:36,707 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:26:39,607 - tools.web_research_tool - INFO - [web_research_tool] 3 results for: Strait of Hormuz shipping April 2026
+2026-04-04 13:26:40,098 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:26:44,388 - agents.executive_producer.agent - INFO - [EP] Executing step 2/4: writer
+2026-04-04 13:26:45,733 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:26:50,148 - tools.file_operations_tool - INFO - [file_ops] Saved output\articles\article_20260404_132650.md (2821 bytes)
+2026-04-04 13:26:50,245 - watchfiles.main - INFO - 1 change detected
+2026-04-04 13:26:50,603 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:26:50,862 - watchfiles.main - INFO - 1 change detected
+2026-04-04 13:26:50,910 - agents.executive_producer.agent - INFO - [EP] Executing step 3/4: script_writer
+2026-04-04 13:26:51,424 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:26:53,881 - tools.file_operations_tool - INFO - [file_ops] Saved output\scripts\news_segment_20260404_132650.md (1498 bytes)
+2026-04-04 13:26:53,937 - watchfiles.main - INFO - 1 change detected
+2026-04-04 13:26:54,316 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:26:54,537 - agents.executive_producer.agent - INFO - [EP] Executing step 4/4: producer
+2026-04-04 13:26:55,168 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:26:55,671 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:26:55,836 - watchfiles.main - INFO - 1 change detected
+2026-04-04 13:26:56,123 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-04 13:28:44,813 - main - INFO - === Newsroom AI shutting down ===
+2026-04-04 13:29:02,894 - main - INFO - === Newsroom AI starting up ===
+2026-04-04 13:29:09,911 - agents.researcher.agent - INFO - Researcher agent initialized
+2026-04-04 13:29:09,911 - main - INFO -   ✓ researcher
+2026-04-04 13:29:09,930 - agents.writer.agent - INFO - Writer agent initialized
+2026-04-04 13:29:09,931 - main - INFO -   ✓ writer
+2026-04-04 13:29:09,952 - agents.script_writer.agent - INFO - Script Writer agent initialized
+2026-04-04 13:29:09,952 - main - INFO -   ✓ script_writer
+2026-04-04 13:29:09,974 - agents.producer.agent - INFO - Producer agent initialized
+2026-04-04 13:29:09,974 - main - INFO -   ✓ producer
+2026-04-04 13:29:10,326 - agents.executive_producer.agent - INFO - Executive Producer initialized
+2026-04-04 13:29:10,326 - main - INFO -   ✓ executive_producer
+2026-04-04 13:29:10,328 - main - INFO - === Newsroom AI ready ===
+2026-04-04 14:00:26,186 - watchfiles.main - INFO - 4 changes detected
+2026-04-04 14:00:29,076 - watchfiles.main - INFO - 4 changes detected
+2026-04-04 14:00:29,219 - main - INFO - === Newsroom AI shutting down ===
+2026-04-04 14:00:30,445 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:30,802 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:31,157 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:31,566 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:31,969 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:32,310 - main - INFO - === Newsroom AI starting up ===
+2026-04-04 14:00:32,327 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:32,684 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:33,042 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:33,449 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:33,803 - watchfiles.main - INFO - 4 changes detected
+2026-04-04 14:00:39,711 - agents.researcher.agent - INFO - Researcher agent initialized
+2026-04-04 14:00:39,712 - main - INFO -   ✓ researcher
+2026-04-04 14:00:39,725 - agents.writer.agent - INFO - Writer agent initialized
+2026-04-04 14:00:39,725 - main - INFO -   ✓ writer
+2026-04-04 14:00:39,744 - agents.script_writer.agent - INFO - Script Writer agent initialized
+2026-04-04 14:00:39,745 - main - INFO -   ✓ script_writer
+2026-04-04 14:00:39,762 - agents.producer.agent - INFO - Producer agent initialized
+2026-04-04 14:00:39,763 - main - INFO -   ✓ producer
+2026-04-04 14:00:39,973 - agents.executive_producer.agent - INFO - Executive Producer initialized
+2026-04-04 14:00:39,974 - main - INFO -   ✓ executive_producer
+2026-04-04 14:00:39,975 - main - INFO - === Newsroom AI ready ===
+2026-04-04 14:00:41,090 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:42,963 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:42,975 - main - INFO - === Newsroom AI starting up ===
+2026-04-04 14:00:43,327 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:43,681 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:44,039 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:44,399 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:44,754 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:45,110 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:45,466 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:45,876 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:46,281 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:46,685 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:47,089 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:47,495 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:47,899 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:48,306 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:48,712 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:49,117 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:49,449 - agents.researcher.agent - INFO - Researcher agent initialized
+2026-04-04 14:00:49,450 - main - INFO -   ✓ researcher
+2026-04-04 14:00:49,463 - agents.writer.agent - INFO - Writer agent initialized
+2026-04-04 14:00:49,464 - main - INFO -   ✓ writer
+2026-04-04 14:00:49,478 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:49,479 - agents.script_writer.agent - INFO - Script Writer agent initialized
+2026-04-04 14:00:49,480 - main - INFO -   ✓ script_writer
+2026-04-04 14:00:49,499 - agents.producer.agent - INFO - Producer agent initialized
+2026-04-04 14:00:49,500 - main - INFO -   ✓ producer
+2026-04-04 14:00:49,666 - agents.executive_producer.agent - INFO - Executive Producer initialized
+2026-04-04 14:00:49,666 - main - INFO -   ✓ executive_producer
+2026-04-04 14:00:49,667 - main - INFO - === Newsroom AI ready ===
+2026-04-04 14:00:49,886 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:50,293 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:50,707 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:51,110 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:51,516 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:51,920 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:52,327 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:52,731 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:53,090 - watchfiles.main - INFO - 5 changes detected
+2026-04-04 14:00:53,289 - main - INFO - === Newsroom AI shutting down ===
+2026-04-04 14:00:54,718 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:57,007 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:57,094 - main - INFO - === Newsroom AI starting up ===
+2026-04-04 14:00:57,373 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:57,732 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:58,088 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:58,444 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:58,805 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:59,163 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:59,570 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:00:59,974 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:00,377 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:00,781 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:01,186 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:01,592 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:01,995 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:02,400 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:02,804 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:03,208 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:03,615 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:04,020 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:04,414 - agents.researcher.agent - INFO - Researcher agent initialized
+2026-04-04 14:01:04,414 - main - INFO -   ✓ researcher
+2026-04-04 14:01:04,427 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:04,429 - agents.writer.agent - INFO - Writer agent initialized
+2026-04-04 14:01:04,430 - main - INFO -   ✓ writer
+2026-04-04 14:01:04,443 - agents.script_writer.agent - INFO - Script Writer agent initialized
+2026-04-04 14:01:04,444 - main - INFO -   ✓ script_writer
+2026-04-04 14:01:04,475 - agents.producer.agent - INFO - Producer agent initialized
+2026-04-04 14:01:04,475 - main - INFO -   ✓ producer
+2026-04-04 14:01:04,696 - agents.executive_producer.agent - INFO - Executive Producer initialized
+2026-04-04 14:01:04,697 - main - INFO -   ✓ executive_producer
+2026-04-04 14:01:04,698 - main - INFO - === Newsroom AI ready ===
+2026-04-04 14:01:04,830 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:05,238 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:05,641 - watchfiles.main - INFO - 5 changes detected
+2026-04-04 14:01:05,785 - main - INFO - === Newsroom AI shutting down ===
+2026-04-04 14:01:06,972 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:08,341 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:08,383 - main - INFO - === Newsroom AI starting up ===
+2026-04-04 14:01:08,702 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:09,060 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:09,418 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:09,776 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:10,134 - watchfiles.main - INFO - 5 changes detected
+2026-04-04 14:01:14,853 - agents.researcher.agent - INFO - Researcher agent initialized
+2026-04-04 14:01:14,853 - main - INFO -   ✓ researcher
+2026-04-04 14:01:14,866 - agents.writer.agent - INFO - Writer agent initialized
+2026-04-04 14:01:14,867 - main - INFO -   ✓ writer
+2026-04-04 14:01:14,879 - agents.script_writer.agent - INFO - Script Writer agent initialized
+2026-04-04 14:01:14,880 - main - INFO -   ✓ script_writer
+2026-04-04 14:01:14,894 - agents.producer.agent - INFO - Producer agent initialized
+2026-04-04 14:01:14,895 - main - INFO -   ✓ producer
+2026-04-04 14:01:15,043 - agents.executive_producer.agent - INFO - Executive Producer initialized
+2026-04-04 14:01:15,043 - main - INFO -   ✓ executive_producer
+2026-04-04 14:01:15,044 - main - INFO - === Newsroom AI ready ===
+2026-04-04 14:01:15,917 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:16,898 - watchfiles.main - INFO - 4 changes detected
+2026-04-04 14:01:20,047 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:20,083 - main - INFO - === Newsroom AI starting up ===
+2026-04-04 14:01:20,410 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:20,770 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:21,129 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:21,488 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:21,848 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:22,208 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:22,568 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:22,978 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:23,380 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:23,785 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:24,201 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:24,608 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:25,011 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:25,415 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:25,823 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:26,228 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:26,398 - agents.researcher.agent - INFO - Researcher agent initialized
+2026-04-04 14:01:26,399 - main - INFO -   ✓ researcher
+2026-04-04 14:01:26,417 - agents.writer.agent - INFO - Writer agent initialized
+2026-04-04 14:01:26,418 - main - INFO -   ✓ writer
+2026-04-04 14:01:26,432 - agents.script_writer.agent - INFO - Script Writer agent initialized
+2026-04-04 14:01:26,433 - main - INFO -   ✓ script_writer
+2026-04-04 14:01:26,450 - agents.producer.agent - INFO - Producer agent initialized
+2026-04-04 14:01:26,450 - main - INFO -   ✓ producer
+2026-04-04 14:01:26,645 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:26,650 - agents.executive_producer.agent - INFO - Executive Producer initialized
+2026-04-04 14:01:26,650 - main - INFO -   ✓ executive_producer
+2026-04-04 14:01:26,653 - main - INFO - === Newsroom AI ready ===
+2026-04-04 14:01:27,051 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:27,454 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:27,858 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:28,263 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:28,620 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:29,036 - watchfiles.main - INFO - 5 changes detected
+2026-04-04 14:01:29,260 - main - INFO - === Newsroom AI shutting down ===
+2026-04-04 14:01:30,334 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:31,600 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:31,637 - main - INFO - === Newsroom AI starting up ===
+2026-04-04 14:01:31,960 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:32,318 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:32,678 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:33,036 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:33,396 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:33,757 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:34,118 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:34,525 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:34,929 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:35,346 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:35,752 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:36,158 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:36,564 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:36,972 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:37,378 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:37,782 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:37,783 - agents.researcher.agent - INFO - Researcher agent initialized
+2026-04-04 14:01:37,783 - main - INFO -   ✓ researcher
+2026-04-04 14:01:37,799 - agents.writer.agent - INFO - Writer agent initialized
+2026-04-04 14:01:37,799 - main - INFO -   ✓ writer
+2026-04-04 14:01:37,813 - agents.script_writer.agent - INFO - Script Writer agent initialized
+2026-04-04 14:01:37,814 - main - INFO -   ✓ script_writer
+2026-04-04 14:01:37,835 - agents.producer.agent - INFO - Producer agent initialized
+2026-04-04 14:01:37,836 - main - INFO -   ✓ producer
+2026-04-04 14:01:38,013 - agents.executive_producer.agent - INFO - Executive Producer initialized
+2026-04-04 14:01:38,013 - main - INFO -   ✓ executive_producer
+2026-04-04 14:01:38,015 - main - INFO - === Newsroom AI ready ===
+2026-04-04 14:01:38,190 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:38,606 - watchfiles.main - INFO - 5 changes detected
+2026-04-04 14:01:38,791 - main - INFO - === Newsroom AI shutting down ===
+2026-04-04 14:01:40,010 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:41,231 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:41,259 - main - INFO - === Newsroom AI starting up ===
+2026-04-04 14:01:41,586 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:41,943 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:42,302 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:42,659 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:43,066 - watchfiles.main - INFO - 5 changes detected
+2026-04-04 14:01:48,226 - agents.researcher.agent - INFO - Researcher agent initialized
+2026-04-04 14:01:48,227 - main - INFO -   ✓ researcher
+2026-04-04 14:01:48,248 - agents.writer.agent - INFO - Writer agent initialized
+2026-04-04 14:01:48,249 - main - INFO -   ✓ writer
+2026-04-04 14:01:48,278 - agents.script_writer.agent - INFO - Script Writer agent initialized
+2026-04-04 14:01:48,278 - main - INFO -   ✓ script_writer
+2026-04-04 14:01:48,311 - agents.producer.agent - INFO - Producer agent initialized
+2026-04-04 14:01:48,313 - main - INFO -   ✓ producer
+2026-04-04 14:01:48,615 - agents.executive_producer.agent - INFO - Executive Producer initialized
+2026-04-04 14:01:48,616 - main - INFO -   ✓ executive_producer
+2026-04-04 14:01:48,618 - main - INFO - === Newsroom AI ready ===
+2026-04-04 14:01:49,562 - watchfiles.main - INFO - 5 changes detected
+2026-04-04 14:01:51,079 - main - INFO - === Newsroom AI starting up ===
+2026-04-04 14:01:51,087 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:51,444 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:51,802 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:52,213 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:52,617 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:53,021 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:53,427 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:53,834 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:54,239 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:54,644 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:55,046 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:55,451 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:55,858 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:56,261 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:56,677 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:57,079 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:57,485 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:57,890 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:58,295 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:58,593 - agents.researcher.agent - INFO - Researcher agent initialized
+2026-04-04 14:01:58,594 - main - INFO -   ✓ researcher
+2026-04-04 14:01:58,639 - agents.writer.agent - INFO - Writer agent initialized
+2026-04-04 14:01:58,647 - main - INFO -   ✓ writer
+2026-04-04 14:01:58,697 - agents.script_writer.agent - INFO - Script Writer agent initialized
+2026-04-04 14:01:58,697 - main - INFO -   ✓ script_writer
+2026-04-04 14:01:58,701 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:58,734 - agents.producer.agent - INFO - Producer agent initialized
+2026-04-04 14:01:58,736 - main - INFO -   ✓ producer
+2026-04-04 14:01:58,997 - agents.executive_producer.agent - INFO - Executive Producer initialized
+2026-04-04 14:01:58,997 - main - INFO -   ✓ executive_producer
+2026-04-04 14:01:58,999 - main - INFO - === Newsroom AI ready ===
+2026-04-04 14:01:59,117 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:59,523 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:01:59,929 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:02:00,333 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:02:00,735 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:02:01,139 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:02:01,542 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:02:01,950 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:02:02,380 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:02:02,751 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:02:03,163 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:02:03,567 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:02:03,972 - watchfiles.main - INFO - 1 change detected
+2026-04-04 14:02:04,375 - watchfiles.main - INFO - 1 change detected

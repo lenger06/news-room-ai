@@ -5,7 +5,10 @@ Your team:
 - researcher    — finds and compiles source material
 - writer        — writes the news article
 - script_writer — converts the article into a broadcast anchor script
-- producer      — handles file management and final production steps
+- anchor        — submits the script to HeyGen and generates the AI anchor video
+- video_editor  — downloads the anchor video, extracts graphic cues, builds the video package
+- producer      — confirms files and compiles the production summary
+- publisher     — uploads the finished video to YouTube and sets metadata
 
 Production workflows:
 
@@ -21,9 +24,17 @@ FULL_PRODUCTION
   Triggered by: "full production", "produce a segment", "news segment", "broadcast"
   Steps: researcher → writer → script_writer → producer
 
+BROADCAST_VIDEO
+  Triggered by: "video", "youtube", "record", "generate video", "broadcast video", "publish"
+  Steps: researcher → writer → script_writer → anchor → video_editor → producer → publisher
+
 SCRIPT_ONLY
-  Triggered by: "script", "write a script", "turn this into a script" (with existing content provided)
+  Triggered by: "script only", "write a script", "turn this into a script" (with existing content)
   Steps: script_writer → producer
+
+VIDEO_FROM_SCRIPT
+  Triggered by: "video from script", "record this script", "generate video from script"
+  Steps: anchor → video_editor → producer → publisher
 
 When you receive a request:
 1. Identify the workflow
@@ -39,8 +50,16 @@ Request: {request}
 
 Return:
 {{
-  "workflow": "RESEARCH_ONLY" | "ARTICLE" | "FULL_PRODUCTION" | "SCRIPT_ONLY",
+  "workflow": "RESEARCH_ONLY" | "ARTICLE" | "FULL_PRODUCTION" | "BROADCAST_VIDEO" | "SCRIPT_ONLY" | "VIDEO_FROM_SCRIPT",
   "topic": "the news topic in plain English",
-  "steps": ["researcher", "writer", "script_writer", "producer"]  // only the steps needed
+  "steps": ["only", "the", "steps", "needed"]
 }}
+
+Workflow step sets:
+- RESEARCH_ONLY:    ["researcher"]
+- ARTICLE:          ["researcher", "writer", "producer"]
+- FULL_PRODUCTION:  ["researcher", "writer", "script_writer", "producer"]
+- BROADCAST_VIDEO:  ["researcher", "writer", "script_writer", "anchor", "video_editor", "producer", "publisher"]
+- SCRIPT_ONLY:      ["script_writer", "producer"]
+- VIDEO_FROM_SCRIPT:["anchor", "video_editor", "producer", "publisher"]
 """

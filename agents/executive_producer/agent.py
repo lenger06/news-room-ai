@@ -45,10 +45,12 @@ class Agent(BaseAgent):
     """Executive Producer — newsroom orchestrator."""
 
     WORKFLOW_STEPS = {
-        "RESEARCH_ONLY":   ["researcher"],
-        "ARTICLE":         ["researcher", "writer", "producer"],
-        "FULL_PRODUCTION": ["researcher", "writer", "script_writer", "producer"],
-        "SCRIPT_ONLY":     ["script_writer", "producer"],
+        "RESEARCH_ONLY":    ["researcher"],
+        "ARTICLE":          ["researcher", "writer", "producer"],
+        "FULL_PRODUCTION":  ["researcher", "writer", "script_writer", "producer"],
+        "BROADCAST_VIDEO":  ["researcher", "writer", "script_writer", "anchor", "video_editor", "producer", "publisher"],
+        "SCRIPT_ONLY":      ["script_writer", "producer"],
+        "VIDEO_FROM_SCRIPT":["anchor", "video_editor", "producer", "publisher"],
     }
 
     def __init__(self):

@@ -40,7 +40,7 @@ class AgentRegistry:
             version="1.0.0",
             module_path="agents.executive_producer.agent",
             parent_agent=None,
-            manages_agents=["researcher", "writer", "script_writer", "producer"],
+            manages_agents=["researcher", "writer", "script_writer", "anchor", "video_editor", "producer", "publisher"],
         ))
         self.register_agent(AgentInfo(
             name="researcher",
@@ -67,11 +67,35 @@ class AgentRegistry:
             parent_agent="executive_producer",
         ))
         self.register_agent(AgentInfo(
+            name="anchor",
+            display_name="Anchor",
+            description="Generates AI news anchor video from broadcast script using HeyGen",
+            version="1.0.0",
+            module_path="agents.anchor.agent",
+            parent_agent="executive_producer",
+        ))
+        self.register_agent(AgentInfo(
+            name="video_editor",
+            display_name="Video Editor",
+            description="Downloads anchor video, extracts graphic cues, builds video package",
+            version="1.0.0",
+            module_path="agents.video_editor.agent",
+            parent_agent="executive_producer",
+        ))
+        self.register_agent(AgentInfo(
             name="producer",
             display_name="Producer",
-            description="Handles final production — saves files and uploads to YouTube",
+            description="Confirms output files and compiles production summary",
             version="1.0.0",
             module_path="agents.producer.agent",
+            parent_agent="executive_producer",
+        ))
+        self.register_agent(AgentInfo(
+            name="publisher",
+            display_name="Publisher",
+            description="Uploads finished video to YouTube and sets title, description, thumbnail",
+            version="1.0.0",
+            module_path="agents.publisher.agent",
             parent_agent="executive_producer",
         ))
 

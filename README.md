@@ -20,8 +20,17 @@ Receives the research brief and writes a polished news article in broadcast styl
 ### Script Writer
 Converts the written article into a spoken broadcast anchor script. Formats it for on-air delivery: natural spoken English, breath-pause markers, phonetic pronunciations for difficult names, and `[GRAPHIC: ...]` cues for supporting visuals. Target read time: 60–90 seconds. Saves the script to `./output/scripts/`.
 
+### Anchor
+Takes the broadcast script and submits it to the HeyGen API to generate an AI news anchor video. Cleans the script for spoken delivery (removes graphic cues, converts pause markers), submits to HeyGen, polls for completion, and returns the video URL and ID.
+
+### Video Editor
+Downloads the completed anchor video from HeyGen, extracts all `[GRAPHIC: ...]` cues from the script as a production notes list, and assembles a `video_package.json` in `./output/media/` containing the video file path, thumbnail URL, graphic cues, and suggested YouTube metadata (title, description, tags).
+
 ### Producer
-The final step. Confirms all output files are saved, compiles a production summary (article path, script path, topic, word counts), and prepares content for distribution. YouTube upload support is stubbed and ready to be wired in.
+Confirms all output files are saved and compiles a final production summary — article path, script path, video path, topic, and word counts.
+
+### Publisher
+Uploads the finished MP4 to YouTube using the video package metadata. Sets the title, description, tags, category, and privacy status (defaults to `unlisted`). Sets the thumbnail from the HeyGen-generated preview image. Returns the final YouTube URL.
 
 ---
 
@@ -34,7 +43,9 @@ The Executive Producer automatically selects the appropriate workflow based on t
 | `RESEARCH_ONLY` | "research", "find information about", "what do we know about" | Researcher |
 | `ARTICLE` | "write an article", "write a story", "cover this story" | Researcher → Writer → Producer |
 | `FULL_PRODUCTION` | "full production", "produce a segment", "news segment", "broadcast" | Researcher → Writer → Script Writer → Producer |
-| `SCRIPT_ONLY` | "write a script", "turn this into a script" (with content provided) | Script Writer → Producer |
+| `BROADCAST_VIDEO` | "video", "youtube", "record", "generate video", "publish" | Researcher → Writer → Script Writer → Anchor → Video Editor → Producer → Publisher |
+| `SCRIPT_ONLY` | "script only", "write a script", "turn this into a script" (with content provided) | Script Writer → Producer |
+| `VIDEO_FROM_SCRIPT` | "video from script", "record this script", "generate video from script" | Anchor → Video Editor → Producer → Publisher |
 
 Each step receives the full output of all prior steps as context, so the Writer always has the research, and the Script Writer always has the article.
 
@@ -49,7 +60,10 @@ Jarvis (or any HTTP client)
              ├─► Researcher      — web_research_tool, image_search_tool, file_operations_tool
              ├─► Writer          — file_operations_tool
              ├─► Script Writer   — file_operations_tool
-             └─► Producer        — file_operations_tool
+             ├─► Anchor          — heygen_tool (generate + poll)
+             ├─► Video Editor    — video_tools (download, extract cues, package)
+             ├─► Producer        — file_operations_tool
+             └─► Publisher       — youtube_tool (upload + thumbnail)
 ```
 
 Output files are saved to:
@@ -69,6 +83,8 @@ output/
 - Python 3.10+
 - OpenAI API key
 - Tavily API key
+- HeyGen API key *(for Anchor agent — video generation)*
+- Google Cloud project with YouTube Data API v3 enabled *(for Publisher agent)*
 
 ### Installation
 
@@ -76,6 +92,21 @@ output/
 cd news-room-ai
 pip install -r requirements.txt
 ```
+
+### HeyGen Setup
+
+1. Sign up at [heygen.com](https://heygen.com) and get your API key from **Settings → API**
+2. Call `GET https://api.heygen.com/v2/avatars` to list available avatars and pick one
+3. Call `GET https://api.heygen.com/v2/voices` to list voices and pick one
+4. Add the IDs to your `.env` as `HEYGEN_AVATAR_ID` and `HEYGEN_VOICE_ID`
+
+### YouTube Setup
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com) → **APIs & Services → Library**
+2. Enable **YouTube Data API v3**
+3. Go to **Credentials → Create Credentials → OAuth 2.0 Client ID** (Desktop app)
+4. Download the JSON file and save it to `credentials/youtube_client_secrets.json`
+5. On first run the Publisher agent will open a browser to authorize — token saved to `credentials/youtube_token.pickle`
 
 ### Environment Variables
 

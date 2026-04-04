@@ -1,0 +1,197 @@
+from langchain.tools import tool
+from typing import Optional
+import logging
+import requests
+import time
+from config.settings import settings
+
+logger = logging.getLogger(__name__)
+
+HEYGEN_BASE_URL = "https://api.heygen.com"
+
+
+@tool
+def generate_anchor_video(
+    script: str,
+    avatar_id: Optional[str] = None,
+    voice_id: Optional[str] = None,
+    title: Optional[str] = None,
+) -> str:
+    """
+    Submit a news anchor script to HeyGen to generate an AI presenter video.
+
+    Args:
+        script: The spoken broadcast script (plain text, no markdown)
+        avatar_id: HeyGen avatar ID to use (uses default from settings if not provided)
+        voice_id: HeyGen voice ID to use (uses default from settings if not provided)
+        title: Optional title for the video in HeyGen
+
+    Returns:
+        JSON string with video_id and status, or error message
+    """
+    import json
+
+    if not settings.HEYGEN_API_KEY:
+        return json.dumps({"error": "HEYGEN_API_KEY not configured", "video_id": None})
+
+    # Truncate to HeyGen's 5000 char limit
+    script = script[:5000]
+
+    avatar = avatar_id or settings.HEYGEN_AVATAR_ID
+    voice = voice_id or settings.HEYGEN_VOICE_ID
+
+    if not avatar or not voice:
+        return json.dumps({
+            "error": "HEYGEN_AVATAR_ID and HEYGEN_VOICE_ID must be configured in .env",
+            "video_id": None,
+        })
+
+    payload = {
+        "video_inputs": [
+            {
+                "character": {
+                    "type": "avatar",
+                    "avatar_id": avatar,
+                    "avatar_style": "normal",
+                },
+                "voice": {
+                    "type": "text",
+                    "input_text": script,
+                    "voice_id": voice,
+                },
+            }
+        ],
+        "dimension": {"width": 1280, "height": 720},
+        "title": title or "News Segment",
+    }
+
+    try:
+        response = requests.post(
+            f"{HEYGEN_BASE_URL}/v2/video/generate",
+            headers={"x-api-key": settings.HEYGEN_API_KEY, "Content-Type": "application/json"},
+            json=payload,
+            timeout=30,
+        )
+
+        if not response.ok:
+            return json.dumps({"error": f"HeyGen HTTP {response.status_code}: {response.text[:200]}", "video_id": None})
+
+        data = response.json()
+        video_id = data.get("data", {}).get("video_id") or data.get("video_id")
+        logger.info(f"[heygen] Video generation started: {video_id}")
+        return json.dumps({"video_id": video_id, "status": "processing"})
+
+    except Exception as e:
+        logger.error(f"[heygen] generate error: {e}", exc_info=True)
+        return json.dumps({"error": str(e), "video_id": None})
+
+
+@tool
+def check_video_status(video_id: str) -> str:
+    """
+    Check the status of a HeyGen video generation job.
+    Poll this every 30 seconds until status is 'completed' or 'failed'.
+
+    Args:
+        video_id: The video ID returned by generate_anchor_video
+
+    Returns:
+        JSON string with status and video_url when complete
+    """
+    import json
+
+    if not settings.HEYGEN_API_KEY:
+        return json.dumps({"error": "HEYGEN_API_KEY not configured"})
+
+    try:
+        response = requests.get(
+            f"{HEYGEN_BASE_URL}/v1/video_status.get",
+            headers={"x-api-key": settings.HEYGEN_API_KEY},
+            params={"video_id": video_id},
+            timeout=15,
+        )
+
+        if not response.ok:
+            return json.dumps({"error": f"HTTP {response.status_code}: {response.text[:200]}"})
+
+        data = response.json().get("data", {})
+        status = data.get("status", "unknown")
+        video_url = data.get("video_url")
+        thumbnail_url = data.get("thumbnail_url")
+
+        logger.info(f"[heygen] Video {video_id} status: {status}")
+        return json.dumps({
+            "video_id": video_id,
+            "status": status,
+            "video_url": video_url,
+            "thumbnail_url": thumbnail_url,
+        })
+
+    except Exception as e:
+        logger.error(f"[heygen] status check error: {e}", exc_info=True)
+        return json.dumps({"error": str(e)})
+
+
+@tool
+def list_heygen_avatars() -> str:
+    """
+    List all available HeyGen avatars so you can pick an appropriate news anchor appearance.
+
+    Returns:
+        JSON string with list of avatars (id, name, gender)
+    """
+    import json
+
+    if not settings.HEYGEN_API_KEY:
+        return json.dumps({"error": "HEYGEN_API_KEY not configured"})
+
+    try:
+        response = requests.get(
+            f"{HEYGEN_BASE_URL}/v2/avatars",
+            headers={"x-api-key": settings.HEYGEN_API_KEY},
+            timeout=15,
+        )
+        if not response.ok:
+            return json.dumps({"error": f"HTTP {response.status_code}"})
+
+        avatars = response.json().get("data", {}).get("avatars", [])
+        simplified = [
+            {"avatar_id": a.get("avatar_id"), "avatar_name": a.get("avatar_name"), "gender": a.get("gender")}
+            for a in avatars
+        ]
+        return json.dumps({"avatars": simplified, "count": len(simplified)})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@tool
+def list_heygen_voices() -> str:
+    """
+    List available HeyGen voices to pick an appropriate news anchor voice.
+
+    Returns:
+        JSON string with list of voices (voice_id, name, language, gender)
+    """
+    import json
+
+    if not settings.HEYGEN_API_KEY:
+        return json.dumps({"error": "HEYGEN_API_KEY not configured"})
+
+    try:
+        response = requests.get(
+            f"{HEYGEN_BASE_URL}/v2/voices",
+            headers={"x-api-key": settings.HEYGEN_API_KEY},
+            timeout=15,
+        )
+        if not response.ok:
+            return json.dumps({"error": f"HTTP {response.status_code}"})
+
+        voices = response.json().get("data", {}).get("voices", [])
+        # Filter to English voices only for brevity
+        english = [
+            {"voice_id": v.get("voice_id"), "name": v.get("name"), "language": v.get("language"), "gender": v.get("gender")}
+            for v in voices if "en" in (v.get("language") or "").lower()
+        ]
+        return json.dumps({"voices": english, "count": len(english)})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
