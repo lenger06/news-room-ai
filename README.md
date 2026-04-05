@@ -208,6 +208,8 @@ pip install -r requirements.txt
 4. Download the JSON file and save it to `credentials/youtube_client_secrets.json`
 5. On first run the Publisher agent will open a browser to authorize — token saved to `credentials/youtube_token.pickle`
 
+See [`credentials/README.md`](credentials/README.md) for full step-by-step setup instructions including OAuth consent screen configuration.
+
 ### Environment Variables
 
 Copy `.env.example` to `.env` and fill in your keys:
