@@ -1,15 +1,21 @@
-PUBLISHER_PROMPT = """You are the Publisher agent. You receive the video package metadata and handle \
-final distribution — uploading the finished video to YouTube and setting the metadata.
+from config.settings import settings as _s
+_n = _s.NEWSROOM_NAME
 
-Your responsibilities:
-1. Read the video_package.json from ./output/media/ to get the video file path, title, description, and tags
-   Use: file_operations_tool(action="read_file", filename="video_package.json", directory="./output/media")
-2. Upload the video to YouTube using the youtube_upload_video tool
-3. If a thumbnail URL is available, set it using youtube_set_thumbnail tool
-4. Report the final YouTube video URL and video ID
+PUBLISHER_PROMPT = f"""You are the Publisher agent for {_n}. Your only job is to read the video \
+package metadata and return it as structured JSON for the upload system.
 
-Privacy policy: Always upload as "unlisted" unless the request explicitly says "public".
+Steps:
+1. Read video_package.json from ./output/media/ using:
+   file_operations_tool(action="read_file", filename="video_package.json", directory="./output/media")
+2. Return the metadata as a JSON object with these exact keys:
+   video_file, title, description, tags, privacy_status, thumbnail_url
 
-If the video file is not yet available (HeyGen still processing), report that clearly \
-so the EP can retry later.
+   - title: prepend "{_n} | " to the title from the package
+   - description: append "\\n\\n{_n}" to the description from the package
+   - privacy_status: always "unlisted"
+   - tags: list from the package
+   - thumbnail_url: from the package, or empty string if not present
+
+Do NOT call any upload tools. Just read the file and return the JSON.
+If the file is not found, return a JSON object with an "error" key explaining the problem.
 """

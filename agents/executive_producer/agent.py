@@ -22,6 +22,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from agents.registry import BaseAgent, AgentInfo, agent_registry
 from agents.executive_producer.prompts import EP_SYSTEM_PROMPT, EP_ANALYSIS_PROMPT
 from config.settings import settings
+from config.anchors import get_anchor, list_anchors
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,11 @@ class ProductionState(TypedDict):
     topic: str
     workflow: str
     steps: List[str]
+
+    # Selected anchor for this production
+    anchor_name: str
+    anchor_avatar_id: str
+    anchor_voice_id: str
 
     # Accumulated outputs keyed by agent name
     outputs: Dict[str, str]
@@ -46,9 +52,9 @@ class Agent(BaseAgent):
 
     WORKFLOW_STEPS = {
         "RESEARCH_ONLY":    ["researcher"],
-        "ARTICLE":          ["researcher", "writer", "producer"],
-        "FULL_PRODUCTION":  ["researcher", "writer", "script_writer", "producer"],
-        "BROADCAST_VIDEO":  ["researcher", "writer", "script_writer", "anchor", "video_editor", "producer", "publisher"],
+        "ARTICLE":          ["researcher", "writer", "fact_checker", "producer"],
+        "FULL_PRODUCTION":  ["researcher", "writer", "fact_checker", "script_writer", "producer"],
+        "BROADCAST_VIDEO":  ["researcher", "writer", "fact_checker", "script_writer", "anchor", "video_editor", "producer", "publisher"],
         "SCRIPT_ONLY":      ["script_writer", "producer"],
         "VIDEO_FROM_SCRIPT":["anchor", "video_editor", "producer", "publisher"],
     }
@@ -94,11 +100,15 @@ class Agent(BaseAgent):
         return graph.compile()
 
     async def _analyse_node(self, state: ProductionState) -> ProductionState:
-        """Use LLM to determine workflow and topic."""
+        """Use LLM to determine workflow, topic, and anchor selection."""
         try:
+            anchor_list = ", ".join(a["name"] for a in list_anchors())
             response = await self.llm.ainvoke([
                 SystemMessage(content=EP_SYSTEM_PROMPT),
-                HumanMessage(content=EP_ANALYSIS_PROMPT.format(request=state["request"])),
+                HumanMessage(content=EP_ANALYSIS_PROMPT.format(
+                    request=state["request"],
+                    anchor_list=anchor_list,
+                )),
             ])
             content = response.content
             match = re.search(r"\{.*\}", content, re.DOTALL)
@@ -109,16 +119,30 @@ class Agent(BaseAgent):
                 state["workflow"] = workflow
                 state["topic"] = parsed.get("topic", state["request"])
                 state["steps"] = steps
-                logger.info(f"[EP] Workflow: {workflow}, Steps: {steps}, Topic: {state['topic']}")
+
+                # Select anchor
+                anchor = get_anchor(parsed.get("anchor_name"))
+                state["anchor_name"] = anchor.name
+                state["anchor_avatar_id"] = anchor.avatar_id
+                state["anchor_voice_id"] = anchor.voice_id
+                logger.info(f"[EP] Workflow: {workflow}, Anchor: {anchor.name}, Topic: {state['topic']}")
             else:
                 state["workflow"] = "ARTICLE"
                 state["steps"] = self.WORKFLOW_STEPS["ARTICLE"]
                 state["topic"] = state["request"]
+                anchor = get_anchor()
+                state["anchor_name"] = anchor.name
+                state["anchor_avatar_id"] = anchor.avatar_id
+                state["anchor_voice_id"] = anchor.voice_id
         except Exception as e:
             logger.error(f"[EP] Analysis error: {e}", exc_info=True)
             state["workflow"] = "ARTICLE"
             state["steps"] = self.WORKFLOW_STEPS["ARTICLE"]
             state["topic"] = state["request"]
+            anchor = get_anchor()
+            state["anchor_name"] = anchor.name
+            state["anchor_avatar_id"] = anchor.avatar_id
+            state["anchor_voice_id"] = anchor.voice_id
             state["error"] = str(e)
         return state
 
@@ -140,6 +164,10 @@ class Agent(BaseAgent):
 
             # Build input for this step: request + prior outputs as context
             prior_outputs = state.get("outputs", {})
+            anchor_name = state.get("anchor_name", "")
+            anchor_avatar_id = state.get("anchor_avatar_id", "")
+            anchor_voice_id = state.get("anchor_voice_id", "")
+
             if prior_outputs:
                 context_block = "\n\n".join(
                     f"=== {name.upper()} OUTPUT ===\n{text}"
@@ -156,6 +184,21 @@ class Agent(BaseAgent):
                     f"TOPIC: {state['topic']}\n\n"
                     f"REQUEST: {state['request']}\n\n"
                     f"Begin your work."
+                )
+
+            # Inject anchor context for script_writer and anchor steps
+            if agent_name == "script_writer" and anchor_name:
+                step_input += (
+                    f"\n\nANCHOR: {anchor_name}\n"
+                    f"Write the script for {anchor_name} to read. "
+                    f"Use their name in the sign-off line instead of [ANCHOR]."
+                )
+            elif agent_name == "anchor" and anchor_avatar_id:
+                step_input += (
+                    f"\n\nANCHOR NAME: {anchor_name}\n"
+                    f"AVATAR ID: {anchor_avatar_id}\n"
+                    f"VOICE ID: {anchor_voice_id}\n"
+                    f"Use these exact avatar_id and voice_id values when calling generate_anchor_video."
                 )
 
             result = await agent.process_message(step_input)
@@ -178,9 +221,21 @@ class Agent(BaseAgent):
         return "done" if idx >= len(state["steps"]) else "next_step"
 
     async def _summarise_node(self, state: ProductionState) -> ProductionState:
-        """Build the final production summary returned to Jarvis."""
+        """Build the final production summary returned to Jarvis and save it to disk."""
+        from datetime import datetime, timezone
+
         outputs = state.get("outputs", {})
-        lines = [f"**Production Complete — {state['workflow']}**", f"Topic: {state['topic']}", ""]
+        anchor_name = state.get("anchor_name", "")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+        lines = [
+            f"**Production Complete — {state['workflow']}**",
+            f"Topic: {state['topic']}",
+            f"Anchor: {anchor_name}" if anchor_name else "",
+            "",
+        ]
+        lines = [l for l in lines if l != ""]  # remove blank placeholder if no anchor
+        lines.append("")
 
         for step in state["steps"]:
             output = outputs.get(step, "[no output]")
@@ -193,6 +248,38 @@ class Agent(BaseAgent):
             lines.append(f"⚠️ One or more steps encountered an error: {state['error']}")
 
         state["final_summary"] = "\n".join(lines)
+
+        # Save full production log (all outputs untruncated)
+        try:
+            log_dir = Path(settings.LOGS_DIR)
+            log_dir.mkdir(parents=True, exist_ok=True)
+            ts_file = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_path = log_dir / f"production_{ts_file}.md"
+
+            full_lines = [
+                f"# Production Log — {state['workflow']}",
+                f"**Date:** {timestamp}",
+                f"**Topic:** {state['topic']}",
+            ]
+            if anchor_name:
+                full_lines.append(f"**Anchor:** {anchor_name}")
+            full_lines.append("")
+
+            for step in state["steps"]:
+                output = outputs.get(step, "[no output]")
+                full_lines.append(f"## {step.replace('_', ' ').title()}")
+                full_lines.append(output)
+                full_lines.append("")
+
+            if state.get("error"):
+                full_lines.append(f"## ⚠️ Errors")
+                full_lines.append(state["error"])
+
+            log_path.write_text("\n".join(full_lines), encoding="utf-8")
+            logger.info(f"[EP] Production log saved: {log_path}")
+        except Exception as e:
+            logger.warning(f"[EP] Could not save production log: {e}")
+
         return state
 
     # ------------------------------------------------------------------ #
@@ -207,6 +294,9 @@ class Agent(BaseAgent):
                 "topic": "",
                 "workflow": "",
                 "steps": [],
+                "anchor_name": "",
+                "anchor_avatar_id": "",
+                "anchor_voice_id": "",
                 "outputs": {},
                 "current_step_index": 0,
                 "error": None,

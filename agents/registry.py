@@ -40,7 +40,7 @@ class AgentRegistry:
             version="1.0.0",
             module_path="agents.executive_producer.agent",
             parent_agent=None,
-            manages_agents=["researcher", "writer", "script_writer", "anchor", "video_editor", "producer", "publisher"],
+            manages_agents=["researcher", "writer", "fact_checker", "script_writer", "anchor", "video_editor", "producer", "publisher"],
         ))
         self.register_agent(AgentInfo(
             name="researcher",
@@ -56,6 +56,14 @@ class AgentRegistry:
             description="Writes news articles from research material",
             version="1.0.0",
             module_path="agents.writer.agent",
+            parent_agent="executive_producer",
+        ))
+        self.register_agent(AgentInfo(
+            name="fact_checker",
+            display_name="Fact Checker",
+            description="Verifies factual claims in draft articles before script production",
+            version="1.0.0",
+            module_path="agents.fact_checker.agent",
             parent_agent="executive_producer",
         ))
         self.register_agent(AgentInfo(

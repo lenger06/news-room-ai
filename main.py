@@ -49,12 +49,12 @@ async def lifespan(app: FastAPI):
     settings.validate()
 
     from agents.registry import agent_registry
-    for name in ["researcher", "writer", "script_writer", "anchor", "video_editor", "producer", "publisher", "executive_producer"]:
+    for name in ["researcher", "writer", "fact_checker", "script_writer", "anchor", "video_editor", "producer", "publisher", "executive_producer"]:
         agent = await agent_registry.get_agent(name)
         logger.info(f"  {'✓' if agent else '✗'} {name}")
 
     # Ensure output directories exist
-    for d in [settings.ARTICLES_DIR, settings.SCRIPTS_DIR, settings.MEDIA_DIR]:
+    for d in [settings.ARTICLES_DIR, settings.SCRIPTS_DIR, settings.MEDIA_DIR, settings.LOGS_DIR]:
         Path(d).mkdir(parents=True, exist_ok=True)
 
     logger.info("=== Newsroom AI ready ===")
@@ -117,7 +117,7 @@ async def health():
         "status": "healthy",
         "agents": {
             name: ("ready" if agent_registry.get_agent_info(name) else "missing")
-            for name in ["executive_producer", "researcher", "writer", "script_writer", "anchor", "video_editor", "producer", "publisher"]
+            for name in ["executive_producer", "researcher", "writer", "fact_checker", "script_writer", "anchor", "video_editor", "producer", "publisher"]
         },
     }
 
