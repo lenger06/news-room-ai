@@ -6,16 +6,87 @@ Designed to run as a standalone backend service called by [Jarvis](https://githu
 
 ---
 
+## Example Prompts
+
+These can be sent directly to `POST /produce` or spoken to Jarvis naturally.
+
+### Research Only
+
+```
+Research the latest developments in the US-China trade war
+Find information about the recent OPEC production cuts
+What do we know about the SpaceX Starship test flight?
+Research key figures and background on the Iran nuclear negotiations
+```
+
+### Write an Article
+
+```
+Write a news article about the Fed rate decision today
+Cover the story of the NATO summit in Brussels
+Write a story about the Supreme Court ruling on immigration
+Write a news article on the latest White House press briefing
+```
+
+### Full Production (Article + Script, no video)
+
+```
+Produce a full news segment on the Strait of Hormuz shipping situation
+Full production on the Israel-Hamas ceasefire negotiations
+Produce a broadcast segment covering the G7 summit outcomes
+News segment on the latest Congressional budget vote
+```
+
+### Broadcast Video (Full pipeline → YouTube)
+
+```
+Generate a news video about the Fed rate decision
+Produce a broadcast video on the Iran conflict and publish it to YouTube
+Create a news video covering the Supreme Court's latest ruling — have Alex Morgan read it
+Generate a video on the White House press conference — have Rick Johnson anchor it
+Produce a broadcast video on the rescue of the downed pilots — have Darlene Smith read it
+Publish a news video on the latest developments in Ukraine
+```
+
+### Script Only (when you already have article content)
+
+```
+Write a script only — here is the article: [paste article text]
+Turn this into a broadcast script: [paste content]
+Script only for this story: [paste text]
+```
+
+### Video From Script (when you already have a script)
+
+```
+Generate a video from this script — have Shawn Green read it: [paste script]
+Record this script with Rick Johnson: [paste script]
+Video from script, use Alex Morgan: [paste script]
+```
+
+### Requesting a Specific Anchor
+
+```
+Produce a broadcast video on the Iran war — have Rick Johnson read it
+Generate a news video with Darlene Smith anchoring
+Alex Morgan should read the Supreme Court story
+Have Shawn Green anchor the White House briefing video
+```
+
+> If no anchor is specified, the Executive Producer picks one at random from the roster.
+
+---
+
 ## Agent Roles
 
 ### Executive Producer
 The orchestrator. Receives every production request, determines the appropriate workflow, selects an anchor from the roster, and delegates to the team in sequence. Saves a full production log to `./output/production_logs/` at the end of every run.
 
 ### Researcher
-Gathers source material using real-time web search (Tavily). Searches for multiple angles — latest developments, background context, key figures, and statistics. Compiles a sourced research brief with URLs that the Writer uses as the basis for the article.
+Gathers source material using real-time web search (Tavily). Searches for multiple angles — latest developments, background context, key figures, and statistics. Compiles a sourced research brief with URLs.
 
 ### Writer
-Receives the research brief and writes a polished news article in broadcast style — inverted pyramid structure, active voice, short sentences, 400–600 words. Includes a branded dateline (e.g. "WASHINGTON — Defy Logic News"). Saves the article to `./output/articles/` in Markdown format.
+Receives the research brief and writes a polished news article in broadcast style — inverted pyramid structure, active voice, short sentences, 400–600 words. Includes a branded dateline (e.g. "WASHINGTON — Defy Logic News"). Saves to `./output/articles/`.
 
 ### Fact Checker
 Reads the draft article and verifies key factual claims using web search. Produces a Fact Check Report with three sections — **Verified**, **Unverified**, and **Corrections Needed** — and issues one of three verdicts:
@@ -26,19 +97,19 @@ Reads the draft article and verifies key factual claims using web search. Produc
 The full report and verdict are passed to all downstream agents as context.
 
 ### Script Writer
-Converts the verified article into a spoken broadcast anchor script. Formats it for on-air delivery: natural spoken English, breath-pause markers, phonetic pronunciations for difficult names, and `[GRAPHIC: ...]` cues for supporting visuals. Uses the selected anchor's name in the sign-off (e.g. "I'm Alex Morgan, Defy Logic News."). Target read time: 60–90 seconds. Saves the script to `./output/scripts/`.
+Converts the verified article into a spoken broadcast anchor script. Formats it for on-air delivery: natural spoken English, breath-pause markers, phonetic pronunciations for difficult names, and `[GRAPHIC: ...]` cues for supporting visuals. Uses the selected anchor's name in the sign-off (e.g. "I'm Alex Morgan, Defy Logic News."). Target read time: 60–90 seconds. Saves to `./output/scripts/`.
 
 ### Anchor
-Takes the broadcast script, cleans it for spoken delivery (removes graphic cues, converts pause markers), and submits it to the HeyGen API using the anchor's specific avatar and voice IDs. Polls for completion natively in Python (every 30 seconds, up to 10 minutes) — does not rely on the LLM to manage polling. Returns the video URL and thumbnail URL when complete.
+Takes the broadcast script, cleans it for spoken delivery, and submits it to HeyGen using the selected anchor's avatar and voice IDs. Polls for completion natively in Python (every 30 seconds, up to 10 minutes) — does not rely on the LLM to manage polling. Returns the video URL and thumbnail URL when complete.
 
 ### Video Editor
-Downloads the completed anchor video from HeyGen, extracts all `[GRAPHIC: ...]` cues from the script as production notes, and assembles a `video_package.json` in `./output/media/` containing the video file path, thumbnail URL, graphic cues, and suggested YouTube metadata.
+Downloads the completed anchor video from HeyGen, extracts all `[GRAPHIC: ...]` cues from the script, and assembles a `video_package.json` in `./output/media/` containing the video file path, thumbnail URL, graphic cues, and suggested YouTube metadata.
 
 ### Producer
 Confirms all output files are saved and compiles a final production summary — article path, script path, video path, topic, and word counts.
 
 ### Publisher
-Reads `video_package.json`, uploads the finished MP4 to YouTube with branded title and description, and sets the HeyGen thumbnail. Uploads exactly once — upload logic runs in native Python, not via the LLM. Returns the final YouTube URL.
+Reads `video_package.json`, uploads the finished MP4 to YouTube with branded title ("Defy Logic News | ...") and description, and sets the HeyGen thumbnail. Uploads exactly once in native Python. Returns the final YouTube URL.
 
 ---
 
@@ -57,17 +128,13 @@ Anchor(
 )
 ```
 
-To request a specific anchor in a production, name them naturally:
-- *"Produce a broadcast video on the Fed rate decision — have Rick Johnson read it"*
-- *"Generate a news video with Darlene Smith"*
-
-If no anchor is specified, the Executive Producer picks one at random.
+Get IDs by calling with your HeyGen API key:
+- `GET https://api.heygen.com/v2/avatars`
+- `GET https://api.heygen.com/v2/voices`
 
 ---
 
 ## Workflows
-
-The Executive Producer automatically selects the appropriate workflow based on the request:
 
 | Workflow | Trigger phrases | Steps |
 |----------|----------------|-------|
@@ -75,7 +142,7 @@ The Executive Producer automatically selects the appropriate workflow based on t
 | `ARTICLE` | "write an article", "write a story", "cover this story" | Researcher → Writer → Fact Checker → Producer |
 | `FULL_PRODUCTION` | "full production", "produce a segment", "news segment", "broadcast" | Researcher → Writer → Fact Checker → Script Writer → Producer |
 | `BROADCAST_VIDEO` | "video", "youtube", "record", "generate video", "publish" | Researcher → Writer → Fact Checker → Script Writer → Anchor → Video Editor → Producer → Publisher |
-| `SCRIPT_ONLY` | "script only", "write a script", "turn this into a script" (with content provided) | Script Writer → Producer |
+| `SCRIPT_ONLY` | "script only", "write a script", "turn this into a script" (with content) | Script Writer → Producer |
 | `VIDEO_FROM_SCRIPT` | "video from script", "record this script", "generate video from script" | Anchor → Video Editor → Producer → Publisher |
 
 Each step receives the full output of all prior steps as context.
@@ -88,7 +155,7 @@ Each step receives the full output of all prior steps as context.
 Jarvis (or any HTTP client)
  └─► POST /produce/async
        └─► Executive Producer (orchestrator)
-             ├─► Researcher      — web_research_tool, image_search_tool, file_operations_tool
+             ├─► Researcher      — web_research_tool, file_operations_tool
              ├─► Writer          — file_operations_tool
              ├─► Fact Checker    — web_research_tool
              ├─► Script Writer   — file_operations_tool
@@ -200,61 +267,43 @@ Server starts at `http://0.0.0.0:8091`.
 ```json
 {
   "request": "Produce a full news segment on the situation in the Strait of Hormuz",
-  "client_datetime": "Friday, April 4, 2026, 12:00 PM PDT"
+  "client_datetime": "Saturday, April 5, 2026, 03:00 PM PDT"
 }
 ```
 
-### Synchronous response format (`/produce`)
-
-```json
-{
-  "success": true,
-  "response": "**Production Complete — FULL_PRODUCTION**\nTopic: ...",
-  "workflow": "FULL_PRODUCTION",
-  "topic": "Strait of Hormuz shipping situation",
-  "agent": "executive_producer"
-}
-```
-
-### Async response format (`/produce/async`)
+### Async response (`/produce/async`)
 
 ```json
 { "job_id": "e4b130b8-a012-4722-9562-388a9ab7aa4b", "status": "started" }
 ```
 
-### Job status format (`/job/{job_id}`)
+### Job status (`/job/{job_id}`)
 
 ```json
 {
   "status": "running | complete | error",
-  "result": "**Production Complete...**",
+  "result": "**Production Complete — BROADCAST_VIDEO**\nTopic: ...",
   "workflow": "BROADCAST_VIDEO",
   "topic": "Strait of Hormuz",
   "error": null
 }
 ```
 
-### SSE event types (`/produce/stream`)
-
-| Type | Description |
-|------|-------------|
-| `status` | Progress update (e.g. "Production started...") |
-| `result` | Final production summary |
-| `done` | Stream complete |
-| `error` | Error message |
-
 ---
 
 ## Calling from Jarvis
 
-Jarvis routes news production requests automatically. Just talk to Jarvis naturally:
+Jarvis routes news production requests automatically. Just talk naturally:
 
-- *"Jarvis, produce a full news segment on the Iran situation"*
-- *"Jarvis, research the latest on shipping through the Strait of Hormuz"*
-- *"Jarvis, generate a news video about the drone strike near Dubai — have Darlene Smith read it"*
-- *"Jarvis, schedule a daily news segment at 6am on the latest White House announcements"*
+```
+Jarvis, produce a full news segment on the Iran situation
+Jarvis, research the latest on shipping through the Strait of Hormuz
+Jarvis, generate a news video about the drone strike near Dubai — have Darlene Smith read it
+Jarvis, schedule a daily broadcast video at 6am on the latest White House announcements
+Jarvis, write a news article about the SpaceX launch
+```
 
-Jarvis detects newsroom intent and forwards the request to the Executive Producer at `http://localhost:8091/produce/async`. Jarvis responds immediately confirming production has started, then notifies you when the video is published. The newsroom backend must be running for this to work.
+Jarvis responds immediately confirming production has started, then notifies you when the video is published. The newsroom backend must be running at `http://localhost:8091`.
 
 To call the API directly:
 
