@@ -90,8 +90,7 @@ def save_video_package(
     save_dir = directory or settings.MEDIA_DIR
     Path(save_dir).mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepath = Path(save_dir) / f"video_package_{timestamp}.json"
+    filepath = Path(save_dir) / "video_package.json"
 
     try:
         # Validate it's valid JSON

@@ -7,6 +7,7 @@ Runs on port 8091. Jarvis calls POST /produce to trigger a production run.
 import asyncio
 import logging
 import sys
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -16,6 +17,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
+
+# In-memory job store: job_id -> {status, result, error, workflow, topic}
+_jobs: dict = {}
 
 project_root = Path(__file__).parent
 if str(project_root) not in sys.path:
@@ -177,6 +181,48 @@ async def produce_stream(body: ProductionRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/produce/async")
+async def produce_async(body: ProductionRequest):
+    """Start a production run in the background. Returns a job_id immediately."""
+    job_id = str(uuid.uuid4())
+    _jobs[job_id] = {"status": "running", "result": None, "error": None, "workflow": None, "topic": None}
+
+    async def run_job():
+        try:
+            from agents.registry import agent_registry
+            ep = await agent_registry.get_agent("executive_producer")
+            if not ep:
+                _jobs[job_id]["status"] = "error"
+                _jobs[job_id]["error"] = "Executive Producer not available"
+                return
+
+            message = body.request
+            if body.client_datetime:
+                message = f"[Current date/time: {body.client_datetime}]\n{message}"
+
+            result = await ep.process_message(message)
+            _jobs[job_id]["status"] = "complete"
+            _jobs[job_id]["result"] = result.get("response", "")
+            _jobs[job_id]["workflow"] = result.get("workflow")
+            _jobs[job_id]["topic"] = result.get("topic")
+        except Exception as e:
+            logger.error(f"Async job {job_id} failed: {e}", exc_info=True)
+            _jobs[job_id]["status"] = "error"
+            _jobs[job_id]["error"] = str(e)
+
+    asyncio.create_task(run_job())
+    logger.info(f"[async] Job {job_id} started for: {body.request[:80]}")
+    return {"job_id": job_id, "status": "started"}
+
+
+@app.get("/job/{job_id}")
+async def get_job(job_id: str):
+    """Poll for the status and result of an async production job."""
+    if job_id not in _jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _jobs[job_id]
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

@@ -151,13 +151,24 @@ def youtube_set_thumbnail(
         if not img_response.ok:
             return f"Error downloading thumbnail: HTTP {img_response.status_code}"
 
-        suffix = ".jpg" if "jpeg" in img_response.headers.get("content-type", "") else ".png"
+        # Determine MIME type from URL extension — CDN may return binary/octet-stream
+        url_lower = thumbnail_url.lower().split("?")[0]
+        if url_lower.endswith(".png"):
+            mime_type = "image/png"
+            suffix = ".png"
+        elif url_lower.endswith(".webp"):
+            mime_type = "image/webp"
+            suffix = ".webp"
+        else:
+            mime_type = "image/jpeg"
+            suffix = ".jpg"
+
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(img_response.content)
             tmp_path = tmp.name
 
         from googleapiclient.http import MediaFileUpload
-        media = MediaFileUpload(tmp_path, mimetype=img_response.headers.get("content-type", "image/jpeg"))
+        media = MediaFileUpload(tmp_path, mimetype=mime_type)
         youtube.thumbnails().set(videoId=video_id, media_body=media).execute()
         os.unlink(tmp_path)
 
