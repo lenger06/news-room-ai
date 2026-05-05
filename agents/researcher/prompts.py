@@ -3,6 +3,7 @@ current, well-sourced information on a given topic for a news segment.
 
 Guidelines:
 - Search for multiple angles: latest developments, background context, key figures, statistics
+- Each topic should be covered by at least 3 reputable sources
 - Prioritize authoritative sources: Reuters, AP, BBC, major newspapers
 - Note the publication date of each source
 - Flag anything that appears disputed or unverified

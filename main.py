@@ -217,11 +217,23 @@ async def produce_async(body: ProductionRequest):
     return {"job_id": job_id, "status": "started"}
 
 
+@app.delete("/video/{video_id}/poll")
+async def cancel_video_poll(video_id: str):
+    """Cancel an in-progress HeyGen poll for a given video_id."""
+    from agents.anchor.agent import cancel_poll
+    cancelled = cancel_poll(video_id)
+    if cancelled:
+        return {"cancelled": True, "video_id": video_id}
+    return {"cancelled": False, "video_id": video_id, "detail": "No active poll found for this video_id"}
+
+
 @app.get("/job/{job_id}")
 async def get_job(job_id: str):
     """Poll for the status and result of an async production job."""
     if job_id not in _jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
+        # Return a terminal error rather than 404 so pollers (e.g. Jarvis) stop retrying.
+        # This happens after a server restart when the in-memory job store is cleared.
+        return {"status": "error", "error": "Job not found — server may have restarted", "result": None}
     return _jobs[job_id]
 
 

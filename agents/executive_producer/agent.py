@@ -22,7 +22,9 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from agents.registry import BaseAgent, AgentInfo, agent_registry
 from agents.executive_producer.prompts import EP_SYSTEM_PROMPT, EP_ANALYSIS_PROMPT
 from config.settings import settings
-from config.anchors import get_anchor, list_anchors
+from config.anchors import get_anchor, list_anchors, list_anchors_for_prompt
+from config.desks import get_desk, list_desks
+from config.playlists import resolve_playlist_ids, get_ids_by_keys
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +35,27 @@ class ProductionState(TypedDict):
     workflow: str
     steps: List[str]
 
+    # Assigned desk
+    desk: str
+    desk_name: str
+    desk_prompt_style: str
+    desk_background_asset_id: str
+
     # Selected anchor for this production
     anchor_name: str
     anchor_avatar_id: str
     anchor_voice_id: str
+
+    # YouTube playlists
+    playlist_ids: List[str]         # fully resolved IDs (automatic + EP picks)
+    extra_playlist_keys: List[str]  # EP-selected keys from the playlists menu
 
     # Accumulated outputs keyed by agent name
     outputs: Dict[str, str]
 
     # Current step tracking
     current_step_index: int
+    anchor_failed: bool
     error: Optional[str]
     final_summary: str
 
@@ -100,14 +113,21 @@ class Agent(BaseAgent):
         return graph.compile()
 
     async def _analyse_node(self, state: ProductionState) -> ProductionState:
-        """Use LLM to determine workflow, topic, and anchor selection."""
+        """Use LLM to determine workflow, desk, topic, and anchor selection."""
         try:
-            anchor_list = ", ".join(a["name"] for a in list_anchors())
+            from config.playlists import list_choosable_for_prompt
+            anchor_list = list_anchors_for_prompt()
+            desk_list = "\n".join(
+                f"  {d['slug']:15} {d['name']} — {d['beat']}"
+                for d in list_desks()
+            )
             response = await self.llm.ainvoke([
                 SystemMessage(content=EP_SYSTEM_PROMPT),
                 HumanMessage(content=EP_ANALYSIS_PROMPT.format(
                     request=state["request"],
                     anchor_list=anchor_list,
+                    desk_list=desk_list,
+                    playlist_list=list_choosable_for_prompt(),
                 )),
             ])
             content = response.content
@@ -120,29 +140,62 @@ class Agent(BaseAgent):
                 state["topic"] = parsed.get("topic", state["request"])
                 state["steps"] = steps
 
-                # Select anchor
-                anchor = get_anchor(parsed.get("anchor_name"))
+                # Resolve desk
+                desk_slug = parsed.get("desk", "national")
+                desk = get_desk(desk_slug)
+                state["desk"] = desk.slug if desk else "national"
+                state["desk_name"] = desk.name if desk else "National Desk"
+                state["desk_prompt_style"] = desk.prompt_style if desk else ""
+                state["desk_background_asset_id"] = desk.background_asset_id if desk else "f6fa4085043140deaba8258a96233036"
+
+                # Select anchor: explicit name > desk preferred > random
+                anchor = get_anchor(
+                    name=parsed.get("anchor_name"),
+                    desk=state["desk"] if not parsed.get("anchor_name") else None,
+                )
                 state["anchor_name"] = anchor.name
-                state["anchor_avatar_id"] = anchor.avatar_id
+                state["anchor_avatar_id"] = anchor.get_avatar_id(parsed.get("avatar_look"))
                 state["anchor_voice_id"] = anchor.voice_id
-                logger.info(f"[EP] Workflow: {workflow}, Anchor: {anchor.name}, Topic: {state['topic']}")
+                state["extra_playlist_keys"] = parsed.get("extra_playlists") or []
+                state["playlist_ids"] = resolve_playlist_ids(
+                    state["desk"], anchor.name, workflow, state["topic"]
+                )
+                logger.info(
+                    f"[EP] Workflow: {workflow} | Desk: {state['desk_name']} | "
+                    f"Anchor: {anchor.name} | Look: {parsed.get('avatar_look', 'default')} | "
+                    f"Extra playlists: {state['extra_playlist_keys']} | Topic: {state['topic']}"
+                )
             else:
                 state["workflow"] = "ARTICLE"
                 state["steps"] = self.WORKFLOW_STEPS["ARTICLE"]
                 state["topic"] = state["request"]
+                state["desk"] = "national"
+                state["desk_name"] = "National Desk"
+                state["desk_prompt_style"] = ""
+                state["desk_background_asset_id"] = "f6fa4085043140deaba8258a96233036"
                 anchor = get_anchor()
                 state["anchor_name"] = anchor.name
-                state["anchor_avatar_id"] = anchor.avatar_id
+                state["anchor_avatar_id"] = anchor.default_avatar_id
                 state["anchor_voice_id"] = anchor.voice_id
+                state["extra_playlist_keys"] = []
+                state["playlist_ids"] = resolve_playlist_ids(
+                    "national", anchor.name, "ARTICLE", state["topic"]
+                )
         except Exception as e:
             logger.error(f"[EP] Analysis error: {e}", exc_info=True)
             state["workflow"] = "ARTICLE"
             state["steps"] = self.WORKFLOW_STEPS["ARTICLE"]
             state["topic"] = state["request"]
+            state["desk"] = "national"
+            state["desk_name"] = "National Desk"
+            state["desk_prompt_style"] = ""
+            state["desk_background_asset_id"] = "f6fa4085043140deaba8258a96233036"
             anchor = get_anchor()
             state["anchor_name"] = anchor.name
-            state["anchor_avatar_id"] = anchor.avatar_id
+            state["anchor_avatar_id"] = anchor.default_avatar_id
             state["anchor_voice_id"] = anchor.voice_id
+            state["extra_playlist_keys"] = []
+            state["playlist_ids"] = []
             state["error"] = str(e)
         return state
 
@@ -186,25 +239,68 @@ class Agent(BaseAgent):
                     f"Begin your work."
                 )
 
-            # Inject anchor context for script_writer and anchor steps
+            # Inject desk + anchor context for script_writer and anchor steps
             if agent_name == "script_writer" and anchor_name:
+                desk_name = state.get("desk_name", "")
+                desk_style = state.get("desk_prompt_style", "")
                 step_input += (
-                    f"\n\nANCHOR: {anchor_name}\n"
+                    f"\n\nDESK: {desk_name}\n"
+                    f"DESK STYLE: {desk_style}\n"
+                    f"ANCHOR: {anchor_name}\n"
                     f"Write the script for {anchor_name} to read. "
                     f"Use their name in the sign-off line instead of [ANCHOR]."
                 )
             elif agent_name == "anchor" and anchor_avatar_id:
+                background_asset_id = state.get("desk_background_asset_id", "")
                 step_input += (
                     f"\n\nANCHOR NAME: {anchor_name}\n"
                     f"AVATAR ID: {anchor_avatar_id}\n"
                     f"VOICE ID: {anchor_voice_id}\n"
-                    f"Use these exact avatar_id and voice_id values when calling generate_anchor_video."
+                    f"BACKGROUND ASSET ID: {background_asset_id}\n"
+                    f"Use these exact avatar_id, voice_id, and background_asset_id values when calling generate_anchor_video."
                 )
+            elif agent_name == "publisher":
+                import json as _json
+                auto_ids = resolve_playlist_ids(
+                    state.get("desk", ""),
+                    state.get("anchor_name", ""),
+                    state.get("workflow", ""),
+                    state.get("topic", ""),
+                )
+                extra_ids = get_ids_by_keys(state.get("extra_playlist_keys", []))
+                # Merge, deduplicate, preserve order
+                seen: set[str] = set()
+                playlist_ids: list[str] = []
+                for pid in auto_ids + extra_ids:
+                    if pid not in seen:
+                        seen.add(pid)
+                        playlist_ids.append(pid)
+                if playlist_ids:
+                    step_input += f"\n\nPLAYLIST_IDS: {_json.dumps(playlist_ids)}"
+                    logger.info(
+                        f"[EP] Publisher: {len(playlist_ids)} playlist(s) — "
+                        f"auto={auto_ids} extra={extra_ids}"
+                    )
 
             result = await agent.process_message(step_input)
             outputs = dict(state.get("outputs", {}))
-            outputs[agent_name] = result.get("response", "")
+            anchor_output = result.get("response", "")
+            outputs[agent_name] = anchor_output
             state["outputs"] = outputs
+
+            # If the anchor step returned no video_id, flag the pipeline to stop.
+            if agent_name == "anchor":
+                import json as _json
+                try:
+                    parsed = _json.loads(anchor_output)
+                    if not parsed.get("video_id"):
+                        raise ValueError("no video_id in anchor response")
+                except Exception:
+                    # Also catch plain-text failure messages
+                    if '"video_id": null' in anchor_output or "FAILED" in anchor_output or "failed" in anchor_output.lower():
+                        logger.warning("[EP] Anchor produced no video_id — halting pipeline.")
+                        state["anchor_failed"] = True
+                        state["error"] = "Anchor step failed to produce a video_id. Pipeline stopped."
 
         except Exception as e:
             logger.error(f"[EP] Step '{agent_name}' failed: {e}", exc_info=True)
@@ -212,13 +308,20 @@ class Agent(BaseAgent):
             outputs[agent_name] = f"[FAILED: {str(e)}]"
             state["outputs"] = outputs
             state["error"] = str(e)
+            if agent_name == "anchor":
+                state["anchor_failed"] = True
 
         state["current_step_index"] = idx + 1
         return state
 
     def _route_after_step(self, state: ProductionState) -> str:
         idx = state.get("current_step_index", 0)
-        return "done" if idx >= len(state["steps"]) else "next_step"
+        if idx >= len(state["steps"]):
+            return "done"
+        # anchor_failed flag is set by _execute_step_node when HeyGen returns no video_id
+        if state.get("anchor_failed"):
+            return "done"
+        return "next_step"
 
     async def _summarise_node(self, state: ProductionState) -> ProductionState:
         """Build the final production summary returned to Jarvis and save it to disk."""
@@ -226,11 +329,13 @@ class Agent(BaseAgent):
 
         outputs = state.get("outputs", {})
         anchor_name = state.get("anchor_name", "")
+        desk_name = state.get("desk_name", "")
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
         lines = [
             f"**Production Complete — {state['workflow']}**",
             f"Topic: {state['topic']}",
+            f"Desk: {desk_name}" if desk_name else "",
             f"Anchor: {anchor_name}" if anchor_name else "",
             "",
         ]
@@ -261,6 +366,8 @@ class Agent(BaseAgent):
                 f"**Date:** {timestamp}",
                 f"**Topic:** {state['topic']}",
             ]
+            if desk_name:
+                full_lines.append(f"**Desk:** {desk_name}")
             if anchor_name:
                 full_lines.append(f"**Anchor:** {anchor_name}")
             full_lines.append("")
@@ -294,11 +401,18 @@ class Agent(BaseAgent):
                 "topic": "",
                 "workflow": "",
                 "steps": [],
+                "desk": "",
+                "desk_name": "",
+                "desk_prompt_style": "",
+                "desk_background_asset_id": "",
                 "anchor_name": "",
                 "anchor_avatar_id": "",
                 "anchor_voice_id": "",
+                "playlist_ids": [],
+                "extra_playlist_keys": [],
                 "outputs": {},
                 "current_step_index": 0,
+                "anchor_failed": False,
                 "error": None,
                 "final_summary": "",
             }
@@ -309,6 +423,8 @@ class Agent(BaseAgent):
                 "agent": "executive_producer",
                 "workflow": final_state.get("workflow"),
                 "topic": final_state.get("topic"),
+                "desk": final_state.get("desk"),
+                "desk_name": final_state.get("desk_name"),
             }
         except Exception as e:
             logger.error(f"[EP] Fatal error: {e}", exc_info=True)

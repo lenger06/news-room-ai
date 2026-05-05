@@ -18,7 +18,10 @@ def _get_youtube_service():
         from googleapiclient.discovery import build
         import pickle
 
-        SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+        # youtube.force-ssl covers uploads, thumbnails, and playlist management.
+        # If you have an existing credentials/youtube_token.pickle, delete it and
+        # re-authenticate once — the new scope requires a fresh token.
+        SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
         token_path = Path("credentials/youtube_token.pickle")
         creds = None
 
@@ -178,3 +181,28 @@ def youtube_set_thumbnail(
     except Exception as e:
         logger.error(f"[youtube_thumbnail] Error: {e}", exc_info=True)
         return json.dumps({"error": str(e)})
+
+
+def add_video_to_playlist(video_id: str, playlist_id: str) -> dict:
+    """
+    Add a YouTube video to a playlist.
+    Returns {"success": True, "playlist_id": ..., "video_id": ...} or {"error": ...}.
+    Called directly (not as a langchain tool) — playlist management is infrastructure,
+    not an LLM decision.
+    """
+    try:
+        youtube = _get_youtube_service()
+        youtube.playlistItems().insert(
+            part="snippet",
+            body={
+                "snippet": {
+                    "playlistId": playlist_id,
+                    "resourceId": {"kind": "youtube#video", "videoId": video_id},
+                }
+            },
+        ).execute()
+        logger.info(f"[youtube_playlist] Added {video_id} to playlist {playlist_id}")
+        return {"success": True, "playlist_id": playlist_id, "video_id": video_id}
+    except Exception as e:
+        logger.warning(f"[youtube_playlist] Failed to add {video_id} to {playlist_id}: {e}")
+        return {"error": str(e), "playlist_id": playlist_id}

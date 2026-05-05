@@ -20,6 +20,7 @@ class Settings:
     HEYGEN_API_KEY: str = os.getenv("HEYGEN_API_KEY", "")
     HEYGEN_AVATAR_ID: str = os.getenv("HEYGEN_AVATAR_ID", "")
     HEYGEN_VOICE_ID: str = os.getenv("HEYGEN_VOICE_ID", "")
+    HEYGEN_CREDIT_MINIMUM: int = int(os.getenv("HEYGEN_CREDIT_MINIMUM", "5"))
 
     # YouTube (publisher agent)
     YOUTUBE_CLIENT_SECRETS_PATH: str = os.getenv("YOUTUBE_CLIENT_SECRETS_PATH", "credentials/youtube_client_secrets.json")

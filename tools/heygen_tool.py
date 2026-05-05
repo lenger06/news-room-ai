@@ -10,11 +10,33 @@ logger = logging.getLogger(__name__)
 HEYGEN_BASE_URL = "https://api.heygen.com"
 
 
+def get_heygen_credits() -> int:
+    """
+    Return remaining HeyGen credits.
+    Raises RuntimeError if the API call fails or the key is not configured.
+    """
+    if not settings.HEYGEN_API_KEY:
+        raise RuntimeError("HEYGEN_API_KEY not configured")
+    response = requests.get(
+        f"{HEYGEN_BASE_URL}/v1/user/remaining.get",
+        headers={"x-api-key": settings.HEYGEN_API_KEY},
+        timeout=15,
+    )
+    if not response.ok:
+        raise RuntimeError(f"HeyGen credits check failed: HTTP {response.status_code}")
+    data = response.json().get("data", {})
+    remaining = data.get("remaining_quota")
+    if remaining is None:
+        raise RuntimeError(f"Unexpected HeyGen credits response: {response.text[:200]}")
+    return int(remaining)
+
+
 @tool
 def generate_anchor_video(
     script: str,
     avatar_id: Optional[str] = None,
     voice_id: Optional[str] = None,
+    background_asset_id: Optional[str] = None,
     title: Optional[str] = None,
 ) -> str:
     """
@@ -24,6 +46,7 @@ def generate_anchor_video(
         script: The spoken broadcast script (plain text, no markdown)
         avatar_id: HeyGen avatar ID to use (uses default from settings if not provided)
         voice_id: HeyGen voice ID to use (uses default from settings if not provided)
+        background_asset_id: HeyGen video background asset ID (uses default if not provided)
         title: Optional title for the video in HeyGen
 
     Returns:
@@ -53,11 +76,17 @@ def generate_anchor_video(
                     "type": "avatar",
                     "avatar_id": avatar,
                     "avatar_style": "normal",
+                    "matting": True,
                 },
                 "voice": {
                     "type": "text",
                     "input_text": script,
                     "voice_id": voice,
+                },
+                "background": {
+                    "type": "video",
+                    "video_asset_id": background_asset_id or "f6fa4085043140deaba8258a96233036",
+                    "play_style": "loop",
                 },
             }
         ],
@@ -70,7 +99,7 @@ def generate_anchor_video(
             f"{HEYGEN_BASE_URL}/v2/video/generate",
             headers={"x-api-key": settings.HEYGEN_API_KEY, "Content-Type": "application/json"},
             json=payload,
-            timeout=30,
+            timeout=60,
         )
 
         if not response.ok:

@@ -23,7 +23,18 @@ logger = logging.getLogger(__name__)
 
 HEYGEN_BASE_URL = "https://api.heygen.com"
 POLL_INTERVAL_SECONDS = 30
-MAX_POLL_ATTEMPTS = 20  # 10 minutes max
+MAX_POLL_ATTEMPTS = 120  # 60 minutes max
+
+_active_polls: dict[str, asyncio.Task] = {}
+
+
+def cancel_poll(video_id: str) -> bool:
+    """Cancel an in-progress poll for video_id. Returns True if a task was found and cancelled."""
+    task = _active_polls.get(video_id)
+    if task and not task.done():
+        task.cancel()
+        return True
+    return False
 
 
 class Agent(BaseAgent):
@@ -60,7 +71,7 @@ class Agent(BaseAgent):
                 f"{HEYGEN_BASE_URL}/v1/video_status.get",
                 headers={"x-api-key": settings.HEYGEN_API_KEY},
                 params={"video_id": video_id},
-                timeout=15,
+                timeout=30,
             )
             if not response.ok:
                 return {"error": f"HTTP {response.status_code}: {response.text[:200]}"}
@@ -77,10 +88,30 @@ class Agent(BaseAgent):
 
     async def _poll_until_complete(self, video_id: str) -> dict:
         """Poll HeyGen every POLL_INTERVAL_SECONDS until the video is ready or we give up."""
+        # HeyGen needs a moment to register the video before the status endpoint responds
+        logger.info(f"[heygen] Waiting 15s before first status check for {video_id}...")
+        await asyncio.sleep(15)
+
+        consecutive_errors = 0
+        MAX_CONSECUTIVE_ERRORS = 5
+
         for attempt in range(1, MAX_POLL_ATTEMPTS + 1):
             logger.info(f"[heygen] Polling attempt {attempt}/{MAX_POLL_ATTEMPTS} for video {video_id}")
             result = await asyncio.to_thread(self._check_status_sync, video_id)
 
+            if "error" in result:
+                consecutive_errors += 1
+                logger.warning(
+                    f"[heygen] Poll error ({consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}): {result['error']}"
+                )
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                    return result
+                # Transient error (e.g. 404 before video registers) — keep retrying
+                if attempt < MAX_POLL_ATTEMPTS:
+                    await asyncio.sleep(POLL_INTERVAL_SECONDS)
+                continue
+
+            consecutive_errors = 0
             status = result.get("status", "unknown")
             logger.info(f"[heygen] Video {video_id} status: {status}")
 
@@ -88,8 +119,6 @@ class Agent(BaseAgent):
                 return result
             if status == "failed":
                 return {"error": f"HeyGen video generation failed for {video_id}", "video_id": video_id}
-            if "error" in result:
-                return result
 
             # Still processing — wait before next check
             if attempt < MAX_POLL_ATTEMPTS:
@@ -100,6 +129,23 @@ class Agent(BaseAgent):
 
     async def process_message(self, message: str, context: dict = None) -> dict:
         try:
+            # Step 0: Credit check — bail early with a clear message rather than wasting the run
+            from tools.heygen_tool import get_heygen_credits
+            try:
+                credits = await asyncio.to_thread(get_heygen_credits)
+                minimum = settings.HEYGEN_CREDIT_MINIMUM
+                logger.info(f"[anchor] HeyGen credits remaining: {credits} (minimum: {minimum})")
+                if credits < minimum:
+                    msg = (
+                        f"HeyGen credit balance too low to proceed: {credits} credit(s) remaining "
+                        f"(minimum required: {minimum}). Please top up your HeyGen account."
+                    )
+                    logger.error(f"[anchor] {msg}")
+                    return {"success": False, "response": msg, "agent": "anchor"}
+            except Exception as credit_err:
+                # Non-fatal — log and continue rather than block production on a check failure
+                logger.warning(f"[anchor] Could not verify HeyGen credits: {credit_err}")
+
             # Step 1: LLM cleans the script and calls generate_anchor_video
             result = await asyncio.to_thread(
                 self.executor.invoke,
@@ -119,8 +165,21 @@ class Agent(BaseAgent):
 
             logger.info(f"[anchor] Video submitted. video_id={video_id}. Starting polling...")
 
-            # Step 3: Native Python polling — no LLM involved
-            poll_result = await self._poll_until_complete(video_id)
+            # Step 3: Native Python polling — wrapped in a task so it can be cancelled
+            poll_task = asyncio.create_task(self._poll_until_complete(video_id))
+            _active_polls[video_id] = poll_task
+            try:
+                poll_result = await poll_task
+            except asyncio.CancelledError:
+                logger.info(f"[anchor] Poll for {video_id} was cancelled by request")
+                return {
+                    "success": False,
+                    "response": f"Polling cancelled for video {video_id}. The video may still be rendering in HeyGen.",
+                    "agent": "anchor",
+                    "video_id": video_id,
+                }
+            finally:
+                _active_polls.pop(video_id, None)
 
             if "error" in poll_result:
                 return {
@@ -165,8 +224,18 @@ class Agent(BaseAgent):
             except Exception:
                 pass
 
-        # Fallback: bare video_id pattern (alphanumeric + hyphens/underscores, 8+ chars)
-        match = re.search(r'video_id["\s:]+([a-zA-Z0-9_\-]{8,})', text)
+        # Bare video_id key (JSON-style or plain, any case)
+        match = re.search(r'video[_\s]id["\s:]+([a-zA-Z0-9_\-]{8,})', text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+        # Natural-language: "video ID is X", "video ID: X", "video ID of X"
+        match = re.search(r'video\s+ID\s+(?:is|:|\bof\b)?\s*[:\s]*([a-zA-Z0-9_\-]{8,})', text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+        # Last resort: bare 32-char hex string (HeyGen video ID format)
+        match = re.search(r'\b([a-f0-9]{32})\b', text)
         if match:
             return match.group(1)
 

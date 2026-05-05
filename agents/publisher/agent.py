@@ -86,6 +86,15 @@ class Agent(BaseAgent):
         logger.info(f"[publisher] Upload complete: {url}")
         return {"youtube_video_id": video_id, "youtube_url": url}
 
+    def _add_to_playlists_sync(self, video_id: str, playlist_ids: list[str]) -> list[dict]:
+        """Add the video to each playlist. Best-effort — failures are logged but don't stop publishing."""
+        from tools.youtube_tool import add_video_to_playlist
+        results = []
+        for pid in playlist_ids:
+            result = add_video_to_playlist(video_id, pid)
+            results.append(result)
+        return results
+
     def _set_thumbnail_sync(self, video_id: str, thumbnail_url: str) -> dict:
         """Synchronous thumbnail set — called via asyncio.to_thread."""
         import requests as req
@@ -123,6 +132,25 @@ class Agent(BaseAgent):
 
     async def process_message(self, message: str, context: dict = None) -> dict:
         try:
+            # Guard: bail out early if this package was already uploaded
+            pkg_path = Path(MEDIA_DIR) / "video_package.json"
+            if pkg_path.exists():
+                try:
+                    existing = json.loads(pkg_path.read_text(encoding="utf-8"))
+                    if existing.get("youtube_video_id"):
+                        yt_id = existing["youtube_video_id"]
+                        url = f"https://www.youtube.com/watch?v={yt_id}"
+                        logger.info(f"[publisher] Already uploaded — skipping. {url}")
+                        return {
+                            "success": True,
+                            "response": f"Already uploaded to YouTube — skipping duplicate upload.\nURL: {url}\nVideo ID: {yt_id}",
+                            "agent": "publisher",
+                            "youtube_url": url,
+                            "youtube_video_id": yt_id,
+                        }
+                except Exception:
+                    pass
+
             # Step 1: LLM reads video_package.json and returns structured metadata as JSON
             result = await asyncio.to_thread(
                 self.executor.invoke,
@@ -153,14 +181,41 @@ class Agent(BaseAgent):
             youtube_url = upload_result["youtube_url"]
             youtube_video_id = upload_result["youtube_video_id"]
 
-            # Step 4: Set thumbnail (best-effort, don't fail production if this errors)
+            # Mark the package as uploaded so re-runs don't duplicate it
+            try:
+                pkg_path = Path(MEDIA_DIR) / "video_package.json"
+                if pkg_path.exists():
+                    pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
+                    pkg["youtube_video_id"] = youtube_video_id
+                    pkg["youtube_url"] = youtube_url
+                    pkg_path.write_text(json.dumps(pkg, indent=2), encoding="utf-8")
+            except Exception as e:
+                logger.warning(f"[publisher] Could not mark package as uploaded: {e}")
+
+            # Step 4: Set thumbnail (best-effort)
             thumb_result = {}
             if thumbnail_url:
                 thumb_result = await asyncio.to_thread(
                     self._set_thumbnail_sync, youtube_video_id, thumbnail_url
                 )
 
+            # Step 5: Add to playlists (best-effort)
+            playlist_ids = self._parse_playlist_ids(message)
+            playlist_results: list[dict] = []
+            if playlist_ids:
+                playlist_results = await asyncio.to_thread(
+                    self._add_to_playlists_sync, youtube_video_id, playlist_ids
+                )
+
             thumb_note = "" if thumb_result.get("success") else f" (thumbnail not set: {thumb_result.get('error', 'unknown')})"
+
+            added = [r["playlist_id"] for r in playlist_results if r.get("success")]
+            failed = [r["playlist_id"] for r in playlist_results if "error" in r]
+            playlist_note = ""
+            if added:
+                playlist_note = f"\nPlaylists: added to {len(added)} playlist(s)"
+            if failed:
+                playlist_note += f" ({len(failed)} failed)"
 
             return {
                 "success": True,
@@ -169,16 +224,28 @@ class Agent(BaseAgent):
                     f"Title: {title}\n"
                     f"URL: {youtube_url}\n"
                     f"Video ID: {youtube_video_id}\n"
-                    f"Privacy: {privacy}{thumb_note}"
+                    f"Privacy: {privacy}{thumb_note}{playlist_note}"
                 ),
                 "agent": "publisher",
                 "youtube_url": youtube_url,
                 "youtube_video_id": youtube_video_id,
+                "playlists_added": added,
             }
 
         except Exception as e:
             logger.error(f"Publisher error: {e}", exc_info=True)
             return {"success": False, "response": f"Publishing failed: {str(e)}", "agent": "publisher"}
+
+    def _parse_playlist_ids(self, message: str) -> list[str]:
+        """Extract PLAYLIST_IDS from the step input injected by the Executive Producer."""
+        import re
+        m = re.search(r"PLAYLIST_IDS:\s*(\[.*?\])", message)
+        if m:
+            try:
+                return json.loads(m.group(1))
+            except Exception:
+                pass
+        return []
 
     def _extract_metadata(self, text: str) -> dict:
         """Extract upload metadata from LLM output — tries JSON blocks first, then key scanning."""
