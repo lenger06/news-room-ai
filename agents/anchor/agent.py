@@ -10,13 +10,10 @@ import json
 import re
 import logging
 import requests
-from langchain.agents import create_openai_functions_agent, AgentExecutor
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from agents.registry import BaseAgent, AgentInfo
-from agents.anchor.prompts import ANCHOR_PROMPT
-from tools.heygen_tool import generate_anchor_video, list_heygen_avatars, list_heygen_voices
-from tools.file_operations_tool import file_operations_tool
+from tools.heygen_tool import get_heygen_credits, generate_video_multiscene
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -38,20 +35,15 @@ def cancel_poll(video_id: str) -> bool:
 
 
 class Agent(BaseAgent):
-    """Anchor — cleans the script, submits to HeyGen, then polls natively until complete."""
+    """
+    Anchor — cleans the script, resolves [BROLL:] markers to image URLs,
+    submits a single- or multi-scene video to HeyGen, then polls until complete.
+    """
 
     def __init__(self):
+        from agents.anchor.prompts import ANCHOR_PROMPT
+        self._system_prompt = ANCHOR_PROMPT
         self.llm = ChatOpenAI(model="gpt-4o", temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
-        # Only give the LLM the submit tool — no polling tool
-        self.tools = [generate_anchor_video, list_heygen_avatars, list_heygen_voices, file_operations_tool]
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", ANCHOR_PROMPT),
-            MessagesPlaceholder("chat_history", optional=True),
-            ("human", "{input}"),
-            MessagesPlaceholder("agent_scratchpad"),
-        ])
-        agent = create_openai_functions_agent(self.llm, self.tools, prompt)
-        self.executor = AgentExecutor(agent=agent, tools=self.tools, verbose=True, max_iterations=5)
         logger.info("Anchor agent initialized")
 
     def get_info(self) -> AgentInfo:
@@ -59,13 +51,100 @@ class Agent(BaseAgent):
             name="anchor",
             display_name="Anchor",
             description="Generates AI news anchor video from broadcast script using HeyGen",
-            version="1.0.0",
+            version="2.0.0",
             module_path="agents.anchor.agent",
             parent_agent="executive_producer",
         )
 
+    # ── Script cleaning ──────────────────────────────────────────────────────
+
+    def _clean_script_sync(self, message: str) -> str:
+        """Use LLM to strip [GRAPHIC:] / [PAUSE] markers while preserving [BROLL:] markers."""
+        response = self.llm.invoke([
+            SystemMessage(content=self._system_prompt),
+            HumanMessage(content=message),
+        ])
+        return response.content.strip()
+
+    # ── B-roll parsing ───────────────────────────────────────────────────────
+
+    def _parse_segments(self, script: str) -> list[dict]:
+        """
+        Split script on [BROLL: ...] markers into alternating anchor/broll segments.
+        re.split with a capture group gives: [text, desc, text, desc, ...]
+        """
+        parts = re.split(r'\[BROLL:\s*([^\]]+)\]', script, flags=re.IGNORECASE)
+        segments = []
+        for i, part in enumerate(parts):
+            part = part.strip()
+            if not part:
+                continue
+            if i % 2 == 0:
+                segments.append({"type": "anchor", "script": part})
+            else:
+                segments.append({"type": "broll", "description": part, "image_url": None})
+        return segments
+
+    def _search_image_sync(self, query: str) -> str | None:
+        """Fetch the first image URL for a query via Tavily."""
+        if not settings.TAVILY_API_KEY:
+            return None
+        try:
+            payload = {
+                "api_key": settings.TAVILY_API_KEY,
+                "query": query,
+                "search_depth": "basic",
+                "include_images": True,
+                "include_image_descriptions": False,
+                "max_results": 3,
+            }
+            resp = requests.post("https://api.tavily.com/search", json=payload, timeout=15)
+            if not resp.ok:
+                return None
+            images = resp.json().get("images", [])
+            if not images:
+                return None
+            first = images[0]
+            return first.get("url") if isinstance(first, dict) else first
+        except Exception as e:
+            logger.warning(f"[anchor] Image search failed for '{query}': {e}")
+            return None
+
+    async def _resolve_broll_images(self, segments: list[dict]) -> list[dict]:
+        """For each broll segment, search for a public image URL."""
+        resolved = []
+        for seg in segments:
+            if seg["type"] == "broll":
+                url = await asyncio.to_thread(self._search_image_sync, seg["description"])
+                if url:
+                    seg["image_url"] = url
+                    logger.info(f"[anchor] B-roll resolved: '{seg['description']}' → {url}")
+                else:
+                    logger.warning(f"[anchor] No image found for b-roll: '{seg['description']}' — scene will be skipped")
+            resolved.append(seg)
+        return resolved
+
+    # ── HeyGen param extraction ──────────────────────────────────────────────
+
+    def _extract_heygen_params(self, message: str) -> tuple[str, str, str]:
+        """Parse AVATAR ID / VOICE ID / BACKGROUND ASSET ID injected by the executive producer."""
+        def find(pattern):
+            m = re.search(pattern, message, re.IGNORECASE)
+            return m.group(1).strip() if m else ""
+
+        avatar_id = find(r'AVATAR ID[:\s]+([^\n]+)')
+        voice_id  = find(r'VOICE ID[:\s]+([^\n]+)')
+        bg_id     = find(r'BACKGROUND ASSET ID[:\s]+([^\n]+)')
+
+        return (
+            avatar_id or settings.HEYGEN_AVATAR_ID,
+            voice_id  or settings.HEYGEN_VOICE_ID,
+            bg_id     or "f6fa4085043140deaba8258a96233036",
+        )
+
+    # ── HeyGen polling ───────────────────────────────────────────────────────
+
     def _check_status_sync(self, video_id: str) -> dict:
-        """Synchronous HeyGen status check — runs in executor thread."""
         try:
             response = requests.get(
                 f"{HEYGEN_BASE_URL}/v1/video_status.get",
@@ -87,26 +166,19 @@ class Agent(BaseAgent):
             return {"error": str(e)}
 
     async def _poll_until_complete(self, video_id: str) -> dict:
-        """Poll HeyGen every POLL_INTERVAL_SECONDS until the video is ready or we give up."""
-        # HeyGen needs a moment to register the video before the status endpoint responds
         logger.info(f"[heygen] Waiting 15s before first status check for {video_id}...")
         await asyncio.sleep(15)
 
         consecutive_errors = 0
-        MAX_CONSECUTIVE_ERRORS = 5
-
         for attempt in range(1, MAX_POLL_ATTEMPTS + 1):
-            logger.info(f"[heygen] Polling attempt {attempt}/{MAX_POLL_ATTEMPTS} for video {video_id}")
+            logger.info(f"[heygen] Poll {attempt}/{MAX_POLL_ATTEMPTS} for {video_id}")
             result = await asyncio.to_thread(self._check_status_sync, video_id)
 
             if "error" in result:
                 consecutive_errors += 1
-                logger.warning(
-                    f"[heygen] Poll error ({consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}): {result['error']}"
-                )
-                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                logger.warning(f"[heygen] Poll error ({consecutive_errors}/5): {result['error']}")
+                if consecutive_errors >= 5:
                     return result
-                # Transient error (e.g. 404 before video registers) — keep retrying
                 if attempt < MAX_POLL_ATTEMPTS:
                     await asyncio.sleep(POLL_INTERVAL_SECONDS)
                 continue
@@ -120,61 +192,89 @@ class Agent(BaseAgent):
             if status == "failed":
                 return {"error": f"HeyGen video generation failed for {video_id}", "video_id": video_id}
 
-            # Still processing — wait before next check
             if attempt < MAX_POLL_ATTEMPTS:
-                logger.info(f"[heygen] Status is '{status}', waiting {POLL_INTERVAL_SECONDS}s before next check...")
+                logger.info(f"[heygen] Status '{status}', waiting {POLL_INTERVAL_SECONDS}s...")
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
         return {"error": f"Timed out waiting for video {video_id} after {MAX_POLL_ATTEMPTS} attempts"}
 
+    # ── Main entry point ─────────────────────────────────────────────────────
+
     async def process_message(self, message: str, context: dict = None) -> dict:
         try:
-            # Step 0: Credit check — bail early with a clear message rather than wasting the run
-            from tools.heygen_tool import get_heygen_credits
+            # Step 0: Credit check
+            credits_before = None
             try:
-                credits = await asyncio.to_thread(get_heygen_credits)
+                credits_before = await asyncio.to_thread(get_heygen_credits)
                 minimum = settings.HEYGEN_CREDIT_MINIMUM
-                logger.info(f"[anchor] HeyGen credits remaining: {credits} (minimum: {minimum})")
-                if credits < minimum:
+                logger.info(f"[anchor] HeyGen credits: {credits_before} (min: {minimum})")
+                if credits_before < minimum:
                     msg = (
-                        f"HeyGen credit balance too low to proceed: {credits} credit(s) remaining "
-                        f"(minimum required: {minimum}). Please top up your HeyGen account."
+                        f"HeyGen credit balance too low: {credits_before} remaining "
+                        f"(minimum: {minimum}). Please top up your HeyGen account."
                     )
                     logger.error(f"[anchor] {msg}")
                     return {"success": False, "response": msg, "agent": "anchor"}
             except Exception as credit_err:
-                # Non-fatal — log and continue rather than block production on a check failure
                 logger.warning(f"[anchor] Could not verify HeyGen credits: {credit_err}")
 
-            # Step 1: LLM cleans the script and calls generate_anchor_video
-            result = await asyncio.to_thread(
-                self.executor.invoke,
-                {"input": message, "chat_history": []}
+            # Step 1: Extract HeyGen params from the message
+            avatar_id, voice_id, bg_id = self._extract_heygen_params(message)
+
+            # Step 2: Extract script_writer output from EP context, then clean it
+            script_match = re.search(
+                r'=== SCRIPT_WRITER OUTPUT ===\s*(.*?)(?:===|\Z)',
+                message, re.DOTALL | re.IGNORECASE,
             )
-            llm_output = result.get("output", "")
+            script_to_clean = script_match.group(1).strip() if script_match else message
+            if script_match:
+                logger.info(f"[anchor] Extracted script_writer output ({len(script_to_clean)} chars)")
+            else:
+                logger.warning("[anchor] No SCRIPT_WRITER OUTPUT section found — using full message")
+            cleaned = await asyncio.to_thread(self._clean_script_sync, script_to_clean)
+            logger.info(f"[anchor] Cleaned script ({len(cleaned)} chars)")
 
-            # Step 2: Extract video_id from the LLM output
-            video_id = self._extract_video_id(llm_output)
-            if not video_id:
-                logger.error(f"[anchor] Could not extract video_id from LLM output: {llm_output[:300]}")
-                return {
-                    "success": False,
-                    "response": f"Anchor failed: could not extract video_id. LLM said: {llm_output}",
-                    "agent": "anchor",
-                }
+            # Step 3: Parse [BROLL:] markers into segments
+            segments = self._parse_segments(cleaned)
+            has_broll = any(s["type"] == "broll" for s in segments)
+            logger.info(
+                f"[anchor] Segments: {len(segments)} "
+                f"({sum(1 for s in segments if s['type'] == 'anchor')} anchor, "
+                f"{sum(1 for s in segments if s['type'] == 'broll')} b-roll)"
+            )
 
-            logger.info(f"[anchor] Video submitted. video_id={video_id}. Starting polling...")
+            # Step 4: Resolve b-roll image URLs
+            if has_broll:
+                segments = await self._resolve_broll_images(segments)
 
-            # Step 3: Native Python polling — wrapped in a task so it can be cancelled
+            # Step 5: Submit to HeyGen
+            title = re.search(r'TOPIC[:\s]+([^\n]+)', message, re.IGNORECASE)
+            title = title.group(1).strip() if title else "News Segment"
+
+            submit_result = await asyncio.to_thread(
+                generate_video_multiscene,
+                segments, avatar_id, voice_id, bg_id, title,
+            )
+
+            if not submit_result.get("video_id"):
+                err = submit_result.get("error", "Unknown error submitting to HeyGen")
+                logger.error(f"[anchor] Submit failed: {err}")
+                return {"success": False, "response": f"Anchor FAILED: {err}", "agent": "anchor"}
+
+            video_id = submit_result["video_id"]
+            scene_count = submit_result.get("scene_count", 1)
+            logger.info(f"[anchor] Submitted. video_id={video_id}, scenes={scene_count}. Polling...")
+
+            # Step 6: Poll until complete
             poll_task = asyncio.create_task(self._poll_until_complete(video_id))
             _active_polls[video_id] = poll_task
             try:
                 poll_result = await poll_task
             except asyncio.CancelledError:
-                logger.info(f"[anchor] Poll for {video_id} was cancelled by request")
+                logger.info(f"[anchor] Poll for {video_id} cancelled")
                 return {
                     "success": False,
-                    "response": f"Polling cancelled for video {video_id}. The video may still be rendering in HeyGen.",
+                    "response": f"Polling cancelled for video {video_id}. It may still be rendering in HeyGen.",
                     "agent": "anchor",
                     "video_id": video_id,
                 }
@@ -184,13 +284,25 @@ class Agent(BaseAgent):
             if "error" in poll_result:
                 return {
                     "success": False,
-                    "response": f"Anchor video polling failed: {poll_result['error']}",
+                    "response": f"Anchor video polling FAILED: {poll_result['error']}",
                     "agent": "anchor",
                     "video_id": video_id,
                 }
 
             video_url = poll_result.get("video_url", "")
             thumbnail_url = poll_result.get("thumbnail_url", "")
+
+            # Log credit cost
+            credits_used_str = ""
+            if credits_before is not None:
+                try:
+                    credits_after = await asyncio.to_thread(get_heygen_credits)
+                    credits_used = credits_before - credits_after
+                    logger.info(f"[anchor] Credits used: {credits_used} (before: {credits_before}, after: {credits_after})")
+                    credits_used_str = f"\ncredits_used: {credits_used} (balance: {credits_after} remaining)"
+                except Exception:
+                    pass
+
             logger.info(f"[anchor] Video ready: {video_url}")
 
             return {
@@ -199,7 +311,9 @@ class Agent(BaseAgent):
                     f"Anchor video generation complete.\n"
                     f"video_id: {video_id}\n"
                     f"video_url: {video_url}\n"
-                    f"thumbnail_url: {thumbnail_url}"
+                    f"thumbnail_url: {thumbnail_url}\n"
+                    f"scenes: {scene_count}"
+                    f"{credits_used_str}"
                 ),
                 "agent": "anchor",
                 "video_id": video_id,
@@ -209,34 +323,4 @@ class Agent(BaseAgent):
 
         except Exception as e:
             logger.error(f"Anchor error: {e}", exc_info=True)
-            return {"success": False, "response": f"Anchor video generation failed: {str(e)}", "agent": "anchor"}
-
-    def _extract_video_id(self, text: str) -> str | None:
-        """Extract video_id from LLM output — tries JSON first, then regex."""
-        # Try parsing embedded JSON
-        json_matches = re.findall(r'\{[^{}]*"video_id"[^{}]*\}', text)
-        for m in json_matches:
-            try:
-                data = json.loads(m)
-                vid = data.get("video_id")
-                if vid:
-                    return vid
-            except Exception:
-                pass
-
-        # Bare video_id key (JSON-style or plain, any case)
-        match = re.search(r'video[_\s]id["\s:]+([a-zA-Z0-9_\-]{8,})', text, re.IGNORECASE)
-        if match:
-            return match.group(1)
-
-        # Natural-language: "video ID is X", "video ID: X", "video ID of X"
-        match = re.search(r'video\s+ID\s+(?:is|:|\bof\b)?\s*[:\s]*([a-zA-Z0-9_\-]{8,})', text, re.IGNORECASE)
-        if match:
-            return match.group(1)
-
-        # Last resort: bare 32-char hex string (HeyGen video ID format)
-        match = re.search(r'\b([a-f0-9]{32})\b', text)
-        if match:
-            return match.group(1)
-
-        return None
+            return {"success": False, "response": f"Anchor video generation FAILED: {str(e)}", "agent": "anchor"}
