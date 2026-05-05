@@ -64,13 +64,37 @@ class Agent(BaseAgent):
     def _read_saved_script(self, output: str) -> str | None:
         import re as _re
         from pathlib import Path as _Path
-        match = _re.search(r'output[/\\]scripts[/\\]([\w\-\.]+\.md)', output)
-        if not match:
+
+        scripts_dir = _Path(settings.SCRIPTS_DIR)
+        if not scripts_dir.exists():
             return None
+
+        # Try several patterns the LLM uses to mention the filename
+        for pattern in (
+            r'output[/\\]scripts[/\\]([\w\-\.]+\.md)',     # full path
+            r'filename\s+[`\'"]?([\w\-]+\.md)[`\'"]?',     # "filename `xxx.md`"
+            r'`([\w\-]+\.md)`',                             # backtick-quoted name
+            r'"([\w\-]+\.md)"',                             # double-quoted name
+        ):
+            match = _re.search(pattern, output, _re.IGNORECASE)
+            if match:
+                path = scripts_dir / match.group(1)
+                if path.exists():
+                    try:
+                        content = path.read_text(encoding="utf-8").strip()
+                        logger.info(f"[script_writer] Appending script from {path.name}")
+                        return content
+                    except Exception as e:
+                        logger.warning(f"[script_writer] Could not read {path}: {e}")
+
+        # Last resort: most recently modified .md in the scripts directory
         try:
-            path = _Path(settings.SCRIPTS_DIR) / match.group(1)
-            if path.exists():
-                return path.read_text(encoding="utf-8").strip()
+            files = sorted(scripts_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if files:
+                content = files[0].read_text(encoding="utf-8").strip()
+                logger.info(f"[script_writer] Appending most recent script: {files[0].name}")
+                return content
         except Exception as e:
-            logger.warning(f"[script_writer] Could not read saved script: {e}")
+            logger.warning(f"[script_writer] Could not read latest script: {e}")
+
         return None

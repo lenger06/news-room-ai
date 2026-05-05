@@ -235,10 +235,11 @@ class Agent(BaseAgent):
                 )
             script_to_clean = script_match.group(1).strip() if script_match else message
             if script_match:
-                logger.info(f"[anchor] Extracted script ({len(script_to_clean)} chars)")
+                logger.info(f"[anchor] Extracted script ({len(script_to_clean)} chars): {script_to_clean[:120]!r}")
             else:
                 logger.warning("[anchor] No script section found — using full message")
             cleaned = await asyncio.to_thread(self._clean_script_sync, script_to_clean)
+            logger.info(f"[anchor] Cleaned script ({len(cleaned)} chars): {cleaned[:120]!r}")
             logger.info(f"[anchor] Cleaned script ({len(cleaned)} chars)")
 
             # Step 3: Parse [BROLL:] markers into segments

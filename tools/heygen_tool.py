@@ -234,14 +234,6 @@ def generate_video_multiscene(
                 logger.warning(f"[heygen] Skipping b-roll scene — could not upload image: {image_url}")
                 continue
             video_inputs.append({
-                "character": {
-                    "type": "avatar",
-                    "avatar_id": avatar_id,
-                    "avatar_style": "normal",
-                    "matting": True,
-                    "scale": 0.3,
-                    "offset": {"x": -0.6, "y": 0.6},  # upper-left corner
-                },
                 "voice": {
                     "type": "silence",
                     "duration": 8,
@@ -249,7 +241,6 @@ def generate_video_multiscene(
                 "background": {
                     "type": "image",
                     "image_asset_id": asset_id,
-                    "fit": "contain",
                 },
             })
 
