@@ -184,12 +184,15 @@ def generate_video_multiscene(
     """
     Build and submit a multi-scene HeyGen video (Studio API v2).
 
-    segments: list of dicts, each either:
-      {"type": "anchor", "script": "spoken text..."}
-      {"type": "broll",  "image_url": "https://...", "description": "caption"}
+    segments: list of dicts with keys:
+      type:              "anchor"
+      script:            spoken text
+      broll_description: optional search query (None → use studio video bg)
+      image_url:         resolved image URL (None → use studio video bg)
 
-    Anchor scenes use the studio background video; b-roll scenes use the image URL
-    as a full-screen background with the anchor silently present in front of it.
+    All scenes have the avatar speaking continuously. Scenes with an image_url
+    use that image as the background (avatar matted in front); others use the
+    studio video background.
 
     Returns {"video_id": "...", "status": "processing", "scene_count": N}
          or {"error": "...", "video_id": None}
@@ -201,48 +204,36 @@ def generate_video_multiscene(
 
     video_inputs = []
     for seg in segments:
-        seg_type = seg.get("type")
-        if seg_type == "anchor":
-            script = (seg.get("script") or "").strip()
-            if not script:
-                continue
-            video_inputs.append({
-                "character": {
-                    "type": "avatar",
-                    "avatar_id": avatar_id,
-                    "avatar_style": "normal",
-                    "matting": True,
-                },
-                "voice": {
-                    "type": "text",
-                    "input_text": script[:5000],
-                    "voice_id": voice_id,
-                },
-                "background": {
-                    "type": "video",
-                    "video_asset_id": background_asset_id,
-                    "play_style": "loop",
-                },
-            })
-        elif seg_type == "broll":
-            image_url = (seg.get("image_url") or "").strip()
-            if not image_url:
-                continue
-            # Studio API v2 requires an asset_id for image backgrounds — upload first
+        script = (seg.get("script") or "").strip()
+        if not script:
+            continue
+
+        image_url = (seg.get("image_url") or "").strip()
+        if image_url:
             asset_id = upload_image_to_heygen(image_url)
-            if not asset_id:
-                logger.warning(f"[heygen] Skipping b-roll scene — could not upload image: {image_url}")
-                continue
-            video_inputs.append({
-                "voice": {
-                    "type": "silence",
-                    "duration": 8,
-                },
-                "background": {
-                    "type": "image",
-                    "image_asset_id": asset_id,
-                },
-            })
+            if asset_id:
+                background = {"type": "image", "image_asset_id": asset_id}
+                logger.info(f"[heygen] Using b-roll image background: asset_id={asset_id}")
+            else:
+                logger.warning(f"[heygen] Image upload failed — falling back to studio background")
+                background = {"type": "video", "video_asset_id": background_asset_id, "play_style": "loop"}
+        else:
+            background = {"type": "video", "video_asset_id": background_asset_id, "play_style": "loop"}
+
+        video_inputs.append({
+            "character": {
+                "type": "avatar",
+                "avatar_id": avatar_id,
+                "avatar_style": "normal",
+                "matting": True,
+            },
+            "voice": {
+                "type": "text",
+                "input_text": script[:5000],
+                "voice_id": voice_id,
+            },
+            "background": background,
+        })
 
     if not video_inputs:
         return {"error": "No valid segments to render", "video_id": None}

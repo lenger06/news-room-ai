@@ -70,19 +70,27 @@ class Agent(BaseAgent):
 
     def _parse_segments(self, script: str) -> list[dict]:
         """
-        Split script on [BROLL: ...] markers into alternating anchor/broll segments.
-        re.split with a capture group gives: [text, desc, text, desc, ...]
+        Split on [BROLL:] markers. Each anchor text segment AFTER a marker is
+        paired with that marker's image description; the avatar speaks that text
+        with the b-roll image as background (matted in front). Segments before
+        the first marker use the studio video background.
         """
         parts = re.split(r'\[BROLL:\s*([^\]]+)\]', script, flags=re.IGNORECASE)
         segments = []
+        pending_broll = None
         for i, part in enumerate(parts):
-            part = part.strip()
-            if not part:
-                continue
-            if i % 2 == 0:
-                segments.append({"type": "anchor", "script": part})
+            if i % 2 == 1:
+                pending_broll = part.strip()
             else:
-                segments.append({"type": "broll", "description": part, "image_url": None})
+                text = part.strip()
+                if text:
+                    segments.append({
+                        "type": "anchor",
+                        "script": text,
+                        "broll_description": pending_broll,
+                        "image_url": None,
+                    })
+                pending_broll = None
         return segments
 
     def _search_image_sync(self, query: str) -> str | None:
@@ -111,16 +119,17 @@ class Agent(BaseAgent):
             return None
 
     async def _resolve_broll_images(self, segments: list[dict]) -> list[dict]:
-        """For each broll segment, search for a public image URL."""
+        """For segments with a broll_description, search for a public image URL."""
         resolved = []
         for seg in segments:
-            if seg["type"] == "broll":
-                url = await asyncio.to_thread(self._search_image_sync, seg["description"])
+            desc = seg.get("broll_description")
+            if desc:
+                url = await asyncio.to_thread(self._search_image_sync, desc)
                 if url:
                     seg["image_url"] = url
-                    logger.info(f"[anchor] B-roll resolved: '{seg['description']}' → {url}")
+                    logger.info(f"[anchor] B-roll resolved: '{desc}' → {url}")
                 else:
-                    logger.warning(f"[anchor] No image found for b-roll: '{seg['description']}' — scene will be skipped")
+                    logger.warning(f"[anchor] No image found for '{desc}' — will use studio background")
             resolved.append(seg)
         return resolved
 
@@ -240,16 +249,13 @@ class Agent(BaseAgent):
                 logger.warning("[anchor] No script section found — using full message")
             cleaned = await asyncio.to_thread(self._clean_script_sync, script_to_clean)
             logger.info(f"[anchor] Cleaned script ({len(cleaned)} chars): {cleaned[:120]!r}")
-            logger.info(f"[anchor] Cleaned script ({len(cleaned)} chars)")
 
             # Step 3: Parse [BROLL:] markers into segments
             segments = self._parse_segments(cleaned)
-            has_broll = any(s["type"] == "broll" for s in segments)
-            logger.info(
-                f"[anchor] Segments: {len(segments)} "
-                f"({sum(1 for s in segments if s['type'] == 'anchor')} anchor, "
-                f"{sum(1 for s in segments if s['type'] == 'broll')} b-roll)"
-            )
+            has_broll = any(s.get("broll_description") for s in segments)
+            n_studio = sum(1 for s in segments if not s.get("broll_description"))
+            n_broll = sum(1 for s in segments if s.get("broll_description"))
+            logger.info(f"[anchor] Segments: {len(segments)} ({n_studio} studio bg, {n_broll} with b-roll image)")
 
             # Step 4: Resolve b-roll image URLs
             if has_broll:
