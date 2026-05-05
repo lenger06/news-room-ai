@@ -221,16 +221,23 @@ class Agent(BaseAgent):
             # Step 1: Extract HeyGen params from the message
             avatar_id, voice_id, bg_id = self._extract_heygen_params(message)
 
-            # Step 2: Extract script_writer output from EP context, then clean it
+            # Step 2: Extract the broadcast script from EP context, then clean it.
+            # Prefer the inline === SCRIPT === block the script_writer appends; fall back to
+            # the full SCRIPT_WRITER OUTPUT section if that marker is absent.
             script_match = re.search(
-                r'=== SCRIPT_WRITER OUTPUT ===\s*(.*?)(?:===|\Z)',
+                r'=== SCRIPT ===\s*(.*?)(?:===|\Z)',
                 message, re.DOTALL | re.IGNORECASE,
             )
+            if not script_match:
+                script_match = re.search(
+                    r'=== SCRIPT_WRITER OUTPUT ===\s*(.*?)(?:===|\Z)',
+                    message, re.DOTALL | re.IGNORECASE,
+                )
             script_to_clean = script_match.group(1).strip() if script_match else message
             if script_match:
-                logger.info(f"[anchor] Extracted script_writer output ({len(script_to_clean)} chars)")
+                logger.info(f"[anchor] Extracted script ({len(script_to_clean)} chars)")
             else:
-                logger.warning("[anchor] No SCRIPT_WRITER OUTPUT section found — using full message")
+                logger.warning("[anchor] No script section found — using full message")
             cleaned = await asyncio.to_thread(self._clean_script_sync, script_to_clean)
             logger.info(f"[anchor] Cleaned script ({len(cleaned)} chars)")
 

@@ -44,9 +44,33 @@ class Agent(BaseAgent):
         )
 
     async def process_message(self, message: str, context: dict = None) -> dict:
+        import re as _re
+        from pathlib import Path as _Path
         try:
             result = self.executor.invoke({"input": message, "chat_history": []})
-            return {"success": True, "response": result.get("output", ""), "agent": "script_writer"}
+            output = result.get("output", "")
+
+            # Append the actual script text so downstream agents (anchor) can extract it
+            # without re-generating from context.
+            script_text = self._read_saved_script(output)
+            if script_text:
+                output = f"{output}\n\n=== SCRIPT ===\n{script_text}"
+
+            return {"success": True, "response": output, "agent": "script_writer"}
         except Exception as e:
             logger.error(f"Script Writer error: {e}", exc_info=True)
             return {"success": False, "response": f"Script writing failed: {str(e)}", "agent": "script_writer"}
+
+    def _read_saved_script(self, output: str) -> str | None:
+        import re as _re
+        from pathlib import Path as _Path
+        match = _re.search(r'output[/\\]scripts[/\\]([\w\-\.]+\.md)', output)
+        if not match:
+            return None
+        try:
+            path = _Path(settings.SCRIPTS_DIR) / match.group(1)
+            if path.exists():
+                return path.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            logger.warning(f"[script_writer] Could not read saved script: {e}")
+        return None

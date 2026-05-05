@@ -31,6 +31,65 @@ def get_heygen_credits() -> int:
     return int(remaining)
 
 
+HEYGEN_UPLOAD_URL = "https://upload.heygen.com"
+
+
+def upload_image_to_heygen(image_url: str) -> str | None:
+    """
+    Download an image from image_url and upload it to HeyGen as an asset.
+    Returns the HeyGen asset_id, or None on failure.
+
+    HeyGen asset upload uses upload.heygen.com (not api.heygen.com),
+    raw binary body, and Content-Type set to the image MIME type.
+    The asset_id is returned in data.id.
+    """
+    if not settings.HEYGEN_API_KEY:
+        logger.warning("[heygen] Cannot upload image: HEYGEN_API_KEY not configured")
+        return None
+    try:
+        # Download image bytes
+        img_resp = requests.get(
+            image_url,
+            timeout=20,
+            headers={"User-Agent": "Mozilla/5.0"},  # some CDNs block bare requests
+        )
+        if not img_resp.ok:
+            logger.warning(f"[heygen] Failed to download image {image_url}: HTTP {img_resp.status_code}")
+            return None
+
+        content_type = img_resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+        # Normalise to a supported MIME type
+        if content_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
+            content_type = "image/jpeg"
+
+        image_bytes = img_resp.content
+        if not image_bytes:
+            logger.warning(f"[heygen] Empty image body from {image_url}")
+            return None
+
+        # Upload raw binary to upload.heygen.com/v1/asset
+        upload_resp = requests.post(
+            f"{HEYGEN_UPLOAD_URL}/v1/asset",
+            headers={
+                "X-Api-Key": settings.HEYGEN_API_KEY,
+                "Content-Type": content_type,
+            },
+            data=image_bytes,
+            timeout=60,
+        )
+        if not upload_resp.ok:
+            logger.warning(f"[heygen] Asset upload failed: HTTP {upload_resp.status_code} {upload_resp.text[:200]}")
+            return None
+
+        asset_id = upload_resp.json().get("data", {}).get("id")
+        logger.info(f"[heygen] Uploaded b-roll image → asset_id={asset_id}")
+        return asset_id
+
+    except Exception as e:
+        logger.warning(f"[heygen] upload_image_to_heygen error: {e}")
+        return None
+
+
 @tool
 def generate_anchor_video(
     script: str,
@@ -113,6 +172,118 @@ def generate_anchor_video(
     except Exception as e:
         logger.error(f"[heygen] generate error: {e}", exc_info=True)
         return json.dumps({"error": str(e), "video_id": None})
+
+
+def generate_video_multiscene(
+    segments: list,
+    avatar_id: str,
+    voice_id: str,
+    background_asset_id: str,
+    title: str = "News Segment",
+) -> dict:
+    """
+    Build and submit a multi-scene HeyGen video (Studio API v2).
+
+    segments: list of dicts, each either:
+      {"type": "anchor", "script": "spoken text..."}
+      {"type": "broll",  "image_url": "https://...", "description": "caption"}
+
+    Anchor scenes use the studio background video; b-roll scenes use the image URL
+    as a full-screen background with the anchor silently present in front of it.
+
+    Returns {"video_id": "...", "status": "processing", "scene_count": N}
+         or {"error": "...", "video_id": None}
+    """
+    import json as _json
+
+    if not settings.HEYGEN_API_KEY:
+        return {"error": "HEYGEN_API_KEY not configured", "video_id": None}
+
+    video_inputs = []
+    for seg in segments:
+        seg_type = seg.get("type")
+        if seg_type == "anchor":
+            script = (seg.get("script") or "").strip()
+            if not script:
+                continue
+            video_inputs.append({
+                "character": {
+                    "type": "avatar",
+                    "avatar_id": avatar_id,
+                    "avatar_style": "normal",
+                    "matting": True,
+                },
+                "voice": {
+                    "type": "text",
+                    "input_text": script[:5000],
+                    "voice_id": voice_id,
+                },
+                "background": {
+                    "type": "video",
+                    "video_asset_id": background_asset_id,
+                    "play_style": "loop",
+                },
+            })
+        elif seg_type == "broll":
+            image_url = (seg.get("image_url") or "").strip()
+            if not image_url:
+                continue
+            # Studio API v2 requires an asset_id for image backgrounds — upload first
+            asset_id = upload_image_to_heygen(image_url)
+            if not asset_id:
+                logger.warning(f"[heygen] Skipping b-roll scene — could not upload image: {image_url}")
+                continue
+            video_inputs.append({
+                "character": {
+                    "type": "avatar",
+                    "avatar_id": avatar_id,
+                    "avatar_style": "normal",
+                    "matting": True,
+                    "scale": 0.3,
+                    "offset": {"x": -0.6, "y": 0.6},  # upper-left corner
+                },
+                "voice": {
+                    "type": "silence",
+                    "duration": 8,
+                },
+                "background": {
+                    "type": "image",
+                    "image_asset_id": asset_id,
+                    "fit": "contain",
+                },
+            })
+
+    if not video_inputs:
+        return {"error": "No valid segments to render", "video_id": None}
+
+    import json as _json
+
+    payload = {
+        "video_inputs": video_inputs,
+        "dimension": {"width": 1280, "height": 720},
+        "title": title,
+    }
+
+    logger.info(f"[heygen] Submitting {len(video_inputs)}-scene payload:\n{_json.dumps(payload, indent=2)}")
+
+    try:
+        response = requests.post(
+            f"{HEYGEN_BASE_URL}/v2/video/generate",
+            headers={"x-api-key": settings.HEYGEN_API_KEY, "Content-Type": "application/json"},
+            json=payload,
+            timeout=60,
+        )
+        if not response.ok:
+            return {"error": f"HeyGen HTTP {response.status_code}: {response.text[:200]}", "video_id": None}
+
+        data = response.json()
+        video_id = data.get("data", {}).get("video_id") or data.get("video_id")
+        logger.info(f"[heygen] Multi-scene video submitted: {video_id} ({len(video_inputs)} scenes)")
+        return {"video_id": video_id, "status": "processing", "scene_count": len(video_inputs)}
+
+    except Exception as e:
+        logger.error(f"[heygen] multiscene generate error: {e}", exc_info=True)
+        return {"error": str(e), "video_id": None}
 
 
 @tool
