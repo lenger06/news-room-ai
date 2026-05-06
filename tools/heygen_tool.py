@@ -39,10 +39,30 @@ _PIP_W, _PIP_H     = 426, 240   # ~1/3 of frame width, 16:9 — visually ~1/6 of
 _PIP_PADDING       = 24          # pixels from top-left edges
 
 
-def _create_pip_composite(image_bytes: bytes) -> bytes | None:
+def _load_bg_frame() -> bytes | None:
+    """
+    Load the studio background frame from BROLL_BG_FRAME_PATH if configured.
+    Returns raw file bytes, or None if the setting is unset or the file is missing.
+    """
+    path_str = settings.BROLL_BG_FRAME_PATH
+    if not path_str:
+        return None
+    try:
+        from pathlib import Path as _Path
+        p = _Path(path_str)
+        if p.exists():
+            return p.read_bytes()
+        logger.warning(f"[heygen] BROLL_BG_FRAME_PATH set but file not found: {p}")
+    except Exception as e:
+        logger.warning(f"[heygen] Could not load background frame: {e}")
+    return None
+
+
+def _create_pip_composite(image_bytes: bytes, bg_bytes: bytes | None = None) -> bytes | None:
     """
     Build a 1280×720 composite for use as a HeyGen background:
-      - full frame: blurred + darkened b-roll (gives the avatar a clean stage)
+      - full frame: studio background (bg_bytes) if provided, otherwise
+        a blurred + darkened version of the b-roll image
       - upper-left inset: sharp b-roll at _PIP_W × _PIP_H
     Returns JPEG bytes, or None on failure (caller falls back to raw upload).
     """
@@ -52,12 +72,18 @@ def _create_pip_composite(image_bytes: bytes) -> bytes | None:
 
         src = Image.open(_io.BytesIO(image_bytes)).convert("RGB")
 
-        # Blurred full-frame background
-        bg = src.resize((_FRAME_W, _FRAME_H), Image.LANCZOS)
-        bg = bg.filter(ImageFilter.GaussianBlur(radius=18))
-        # Darken so the avatar stands out
-        black = Image.new("RGB", (_FRAME_W, _FRAME_H), (0, 0, 0))
-        bg = Image.blend(bg, black, alpha=0.45)
+        if bg_bytes:
+            bg = Image.open(_io.BytesIO(bg_bytes)).convert("RGB").resize(
+                (_FRAME_W, _FRAME_H), Image.LANCZOS
+            )
+            logger.info("[heygen] Using studio background frame for PiP composite")
+        else:
+            # Fall back: blurred + darkened b-roll fills the frame
+            bg = src.resize((_FRAME_W, _FRAME_H), Image.LANCZOS)
+            bg = bg.filter(ImageFilter.GaussianBlur(radius=18))
+            black = Image.new("RGB", (_FRAME_W, _FRAME_H), (0, 0, 0))
+            bg = Image.blend(bg, black, alpha=0.45)
+            logger.info("[heygen] No studio background frame configured — using blurred b-roll")
 
         # Sharp PiP inset in upper-left
         pip = src.resize((_PIP_W, _PIP_H), Image.LANCZOS)
@@ -72,7 +98,7 @@ def _create_pip_composite(image_bytes: bytes) -> bytes | None:
         return None
 
 
-def upload_image_to_heygen(image_url: str, pip_composite: bool = False) -> str | None:
+def upload_image_to_heygen(image_url: str, pip_composite: bool = False, bg_bytes: bytes | None = None) -> str | None:
     """
     Download an image from image_url and upload it to HeyGen as an asset.
     If pip_composite=True, converts the image to a PiP composite before uploading.
@@ -102,7 +128,7 @@ def upload_image_to_heygen(image_url: str, pip_composite: bool = False) -> str |
             return None
 
         if pip_composite:
-            composite = _create_pip_composite(image_bytes)
+            composite = _create_pip_composite(image_bytes, bg_bytes=bg_bytes)
             if composite:
                 image_bytes = composite
                 content_type = "image/jpeg"
@@ -246,6 +272,9 @@ def generate_video_multiscene(
     if not settings.HEYGEN_API_KEY:
         return {"error": "HEYGEN_API_KEY not configured", "video_id": None}
 
+    # Load studio background frame once for all PiP composites in this run
+    bg_frame = _load_bg_frame()
+
     video_inputs = []
     for seg in segments:
         script = (seg.get("script") or "").strip()
@@ -254,7 +283,7 @@ def generate_video_multiscene(
 
         image_url = (seg.get("image_url") or "").strip()
         if image_url:
-            asset_id = upload_image_to_heygen(image_url, pip_composite=True)
+            asset_id = upload_image_to_heygen(image_url, pip_composite=True, bg_bytes=bg_frame)
             if asset_id:
                 background = {"type": "image", "image_asset_id": asset_id}
             else:

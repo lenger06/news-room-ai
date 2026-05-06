@@ -37,6 +37,12 @@ class Settings:
     MEDIA_DIR: str = os.getenv("MEDIA_DIR", "./output/media")
     LOGS_DIR: str = os.getenv("LOGS_DIR", "./output/production_logs")
 
+    # B-roll PiP compositing
+    # Path to a still frame (JPEG/PNG) of the studio background used as the
+    # composite base when showing b-roll in the upper-left corner.
+    # If not set, falls back to a blurred version of the b-roll image itself.
+    BROLL_BG_FRAME_PATH: str = os.getenv("BROLL_BG_FRAME_PATH", "")
+
     @classmethod
     def validate(cls):
         if not cls.OPENAI_API_KEY:
