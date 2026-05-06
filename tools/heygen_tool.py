@@ -33,25 +33,59 @@ def get_heygen_credits() -> int:
 
 HEYGEN_UPLOAD_URL = "https://upload.heygen.com"
 
+# PiP layout constants (for b-roll upper-left inset)
+_FRAME_W, _FRAME_H = 1280, 720
+_PIP_W, _PIP_H     = 426, 240   # ~1/3 of frame width, 16:9 — visually ~1/6 of screen
+_PIP_PADDING       = 24          # pixels from top-left edges
 
-def upload_image_to_heygen(image_url: str) -> str | None:
+
+def _create_pip_composite(image_bytes: bytes) -> bytes | None:
+    """
+    Build a 1280×720 composite for use as a HeyGen background:
+      - full frame: blurred + darkened b-roll (gives the avatar a clean stage)
+      - upper-left inset: sharp b-roll at _PIP_W × _PIP_H
+    Returns JPEG bytes, or None on failure (caller falls back to raw upload).
+    """
+    try:
+        from PIL import Image, ImageFilter
+        import io as _io
+
+        src = Image.open(_io.BytesIO(image_bytes)).convert("RGB")
+
+        # Blurred full-frame background
+        bg = src.resize((_FRAME_W, _FRAME_H), Image.LANCZOS)
+        bg = bg.filter(ImageFilter.GaussianBlur(radius=18))
+        # Darken so the avatar stands out
+        black = Image.new("RGB", (_FRAME_W, _FRAME_H), (0, 0, 0))
+        bg = Image.blend(bg, black, alpha=0.45)
+
+        # Sharp PiP inset in upper-left
+        pip = src.resize((_PIP_W, _PIP_H), Image.LANCZOS)
+        bg.paste(pip, (_PIP_PADDING, _PIP_PADDING))
+
+        out = _io.BytesIO()
+        bg.save(out, format="JPEG", quality=88)
+        logger.info(f"[heygen] PiP composite created ({_PIP_W}×{_PIP_H} inset on {_FRAME_W}×{_FRAME_H} frame)")
+        return out.getvalue()
+    except Exception as e:
+        logger.warning(f"[heygen] PiP composite failed: {e}")
+        return None
+
+
+def upload_image_to_heygen(image_url: str, pip_composite: bool = False) -> str | None:
     """
     Download an image from image_url and upload it to HeyGen as an asset.
+    If pip_composite=True, converts the image to a PiP composite before uploading.
     Returns the HeyGen asset_id, or None on failure.
-
-    HeyGen asset upload uses upload.heygen.com (not api.heygen.com),
-    raw binary body, and Content-Type set to the image MIME type.
-    The asset_id is returned in data.id.
     """
     if not settings.HEYGEN_API_KEY:
         logger.warning("[heygen] Cannot upload image: HEYGEN_API_KEY not configured")
         return None
     try:
-        # Download image bytes
         img_resp = requests.get(
             image_url,
             timeout=20,
-            headers={"User-Agent": "Mozilla/5.0"},  # some CDNs block bare requests
+            headers={"User-Agent": "Mozilla/5.0"},
         )
         if not img_resp.ok:
             logger.warning(f"[heygen] Failed to download image {image_url}: HTTP {img_resp.status_code}")
@@ -61,16 +95,23 @@ def upload_image_to_heygen(image_url: str) -> str | None:
         if not content_type.startswith("image/"):
             logger.warning(f"[heygen] URL is not an image (Content-Type: {content_type!r}): {image_url[:80]}")
             return None
-        # Normalise to a HeyGen-supported MIME type
-        if content_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
-            content_type = "image/jpeg"
 
         image_bytes = img_resp.content
         if not image_bytes:
             logger.warning(f"[heygen] Empty image body from {image_url}")
             return None
 
-        # Upload raw binary to upload.heygen.com/v1/asset
+        if pip_composite:
+            composite = _create_pip_composite(image_bytes)
+            if composite:
+                image_bytes = composite
+                content_type = "image/jpeg"
+            # else fall through with the raw image
+
+        # Normalise to a HeyGen-supported MIME type
+        if content_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
+            content_type = "image/jpeg"
+
         upload_resp = requests.post(
             f"{HEYGEN_UPLOAD_URL}/v1/asset",
             headers={
@@ -85,7 +126,7 @@ def upload_image_to_heygen(image_url: str) -> str | None:
             return None
 
         asset_id = upload_resp.json().get("data", {}).get("id")
-        logger.info(f"[heygen] Uploaded b-roll image → asset_id={asset_id}")
+        logger.info(f"[heygen] Uploaded image → asset_id={asset_id}")
         return asset_id
 
     except Exception as e:
@@ -213,12 +254,11 @@ def generate_video_multiscene(
 
         image_url = (seg.get("image_url") or "").strip()
         if image_url:
-            asset_id = upload_image_to_heygen(image_url)
+            asset_id = upload_image_to_heygen(image_url, pip_composite=True)
             if asset_id:
                 background = {"type": "image", "image_asset_id": asset_id}
-                logger.info(f"[heygen] Using b-roll image background: asset_id={asset_id}")
             else:
-                logger.warning(f"[heygen] Image upload failed — falling back to studio background")
+                logger.warning("[heygen] B-roll upload failed — falling back to studio background")
                 background = {"type": "video", "video_asset_id": background_asset_id, "play_style": "loop"}
         else:
             background = {"type": "video", "video_asset_id": background_asset_id, "play_style": "loop"}
