@@ -10,7 +10,7 @@ Script format:
 - Add [PAUSE] markers at natural breath points
 - Mark phonetic pronunciations in brackets for unusual names: e.g. Hormuz [hor-MOOZ]
 - Add [GRAPHIC: description] cues where a lower-third or map should appear on screen
-- Add [BROLL: search query] cues at 1–3 natural visual moments where a b-roll photo should appear behind the anchor (e.g. [BROLL: Met Gala red carpet arrivals 2026]). The search query should be specific enough to find a relevant news photo. Place the marker between sentences, not mid-sentence. The image stays visible for as long as the anchor speaks before the next section — so write 2–4 sentences after each marker if you want the image on screen for a meaningful amount of time. Fewer sentences = briefer image.
+- Add [BROLL: url | description] markers at 1–3 natural visual moments where a b-roll image should appear behind the anchor. Use images from the "## SOURCED B-ROLL IMAGES" section in the research brief — copy the URL and description exactly: e.g. [BROLL: https://example.com/photo.jpg | Met Gala red carpet 2026]. If no sourced image fits a particular moment, use [BROLL: search query] (no URL) and the system will search for one. Place markers between sentences, not mid-sentence. The image stays visible for as long as the anchor speaks before the next section — write 2–4 sentences after each marker for meaningful dwell time.
 - Total read time: aim for 60–90 seconds (approximately 150–200 words)
 - Begin with a standard anchor intro line that opens with "{_n}"
 - End with a standard sign-off line. If an ANCHOR name is provided in your input, use it in the sign-off (e.g. "I'm Alex Morgan, {_n}."). Otherwise use the placeholder "[ANCHOR], {_n}."

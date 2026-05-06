@@ -71,26 +71,43 @@ class Agent(BaseAgent):
     def _parse_segments(self, script: str) -> list[dict]:
         """
         Split on [BROLL:] markers. Each anchor text segment AFTER a marker is
-        paired with that marker's image description; the avatar speaks that text
-        with the b-roll image as background (matted in front). Segments before
-        the first marker use the studio video background.
+        paired with that marker's image. Marker content can be:
+          "https://... | description"  — pre-sourced URL from researcher
+          "search query"               — fallback: anchor will search for an image
         """
         parts = re.split(r'\[BROLL:\s*([^\]]+)\]', script, flags=re.IGNORECASE)
         segments = []
-        pending_broll = None
+        pending_url = None
+        pending_desc = None
         for i, part in enumerate(parts):
             if i % 2 == 1:
-                pending_broll = part.strip()
+                content = part.strip()
+                if '|' in content:
+                    url_part, desc_part = content.split('|', 1)
+                    url_part = url_part.strip()
+                    if url_part.startswith('http'):
+                        pending_url = url_part
+                        pending_desc = desc_part.strip()
+                    else:
+                        pending_url = None
+                        pending_desc = content
+                elif content.startswith('http'):
+                    pending_url = content
+                    pending_desc = None
+                else:
+                    pending_url = None
+                    pending_desc = content
             else:
                 text = part.strip()
                 if text:
                     segments.append({
                         "type": "anchor",
                         "script": text,
-                        "broll_description": pending_broll,
-                        "image_url": None,
+                        "broll_description": pending_desc,
+                        "image_url": pending_url,
                     })
-                pending_broll = None
+                pending_url = None
+                pending_desc = None
         return segments
 
     def _search_image_sync(self, query: str) -> str | None:
@@ -119,17 +136,22 @@ class Agent(BaseAgent):
             return None
 
     async def _resolve_broll_images(self, segments: list[dict]) -> list[dict]:
-        """For segments with a broll_description, search for a public image URL."""
+        """
+        Ensure every b-roll segment has an image_url.
+        Pre-sourced URLs (from researcher) are used as-is.
+        Segments with only a description fall back to a Tavily search.
+        """
         resolved = []
         for seg in segments:
-            desc = seg.get("broll_description")
-            if desc:
-                url = await asyncio.to_thread(self._search_image_sync, desc)
+            if seg.get("image_url"):
+                logger.info(f"[anchor] B-roll pre-sourced: '{seg.get('broll_description')}' → {seg['image_url'][:80]}")
+            elif seg.get("broll_description"):
+                url = await asyncio.to_thread(self._search_image_sync, seg["broll_description"])
                 if url:
                     seg["image_url"] = url
-                    logger.info(f"[anchor] B-roll resolved: '{desc}' → {url}")
+                    logger.info(f"[anchor] B-roll searched: '{seg['broll_description']}' → {url}")
                 else:
-                    logger.warning(f"[anchor] No image found for '{desc}' — will use studio background")
+                    logger.warning(f"[anchor] No image found for '{seg['broll_description']}' — using studio background")
             resolved.append(seg)
         return resolved
 
