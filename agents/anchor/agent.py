@@ -110,6 +110,19 @@ class Agent(BaseAgent):
                 pending_desc = None
         return segments
 
+    def _is_image_url(self, url: str) -> bool:
+        """HEAD request to confirm the URL points to an actual image file."""
+        try:
+            resp = requests.head(
+                url, timeout=5,
+                headers={"User-Agent": "Mozilla/5.0"},
+                allow_redirects=True,
+            )
+            ct = resp.headers.get("Content-Type", "").split(";")[0].strip()
+            return ct.startswith("image/")
+        except Exception:
+            return False
+
     def _search_image_sync(self, query: str) -> str | None:
         """Fetch the first image URL for a query via Tavily."""
         if not settings.TAVILY_API_KEY:
@@ -137,21 +150,33 @@ class Agent(BaseAgent):
 
     async def _resolve_broll_images(self, segments: list[dict]) -> list[dict]:
         """
-        Ensure every b-roll segment has an image_url.
-        Pre-sourced URLs (from researcher) are used as-is.
-        Segments with only a description fall back to a Tavily search.
+        Ensure every b-roll segment has a valid image_url.
+        Pre-sourced URLs are validated with a HEAD request; if not a real image
+        (e.g. researcher passed an article URL), fall back to Tavily search.
+        Description-only segments always use Tavily search.
         """
         resolved = []
         for seg in segments:
-            if seg.get("image_url"):
-                logger.info(f"[anchor] B-roll pre-sourced: '{seg.get('broll_description')}' → {seg['image_url'][:80]}")
-            elif seg.get("broll_description"):
-                url = await asyncio.to_thread(self._search_image_sync, seg["broll_description"])
-                if url:
-                    seg["image_url"] = url
-                    logger.info(f"[anchor] B-roll searched: '{seg['broll_description']}' → {url}")
+            desc = seg.get("broll_description")
+            url = seg.get("image_url")
+
+            if url:
+                valid = await asyncio.to_thread(self._is_image_url, url)
+                if valid:
+                    logger.info(f"[anchor] B-roll pre-sourced OK: '{desc}' → {url[:80]}")
                 else:
-                    logger.warning(f"[anchor] No image found for '{seg['broll_description']}' — using studio background")
+                    logger.warning(f"[anchor] Pre-sourced URL is not an image — falling back to search: {url[:80]}")
+                    seg["image_url"] = None
+                    url = None
+
+            if not url and desc:
+                found = await asyncio.to_thread(self._search_image_sync, desc)
+                if found:
+                    seg["image_url"] = found
+                    logger.info(f"[anchor] B-roll searched: '{desc}' → {found}")
+                else:
+                    logger.warning(f"[anchor] No image found for '{desc}' — using studio background")
+
             resolved.append(seg)
         return resolved
 

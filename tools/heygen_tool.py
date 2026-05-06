@@ -57,8 +57,11 @@ def upload_image_to_heygen(image_url: str) -> str | None:
             logger.warning(f"[heygen] Failed to download image {image_url}: HTTP {img_resp.status_code}")
             return None
 
-        content_type = img_resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
-        # Normalise to a supported MIME type
+        content_type = img_resp.headers.get("Content-Type", "").split(";")[0].strip()
+        if not content_type.startswith("image/"):
+            logger.warning(f"[heygen] URL is not an image (Content-Type: {content_type!r}): {image_url[:80]}")
+            return None
+        # Normalise to a HeyGen-supported MIME type
         if content_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
             content_type = "image/jpeg"
 

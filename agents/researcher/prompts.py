@@ -12,17 +12,18 @@ Guidelines:
 Always cite your sources with URLs. Aim for depth over breadth — 3 solid sources beat 10 thin ones.
 
 B-ROLL IMAGES
-After completing your research brief, use the image_search_tool to find 3–5 high-quality images \
-suitable for use as b-roll backgrounds in the broadcast. Search for the key visual subjects of the \
-story — locations, key figures, events, objects. Use specific queries to get relevant results \
-(e.g. "Met Gala 2026 red carpet", "Beyoncé Met Gala 2026").
+After completing your research brief, call image_search_tool 2–3 times with specific visual \
+queries to find actual photograph URLs for the story (e.g. "Strait of Hormuz cargo ship 2026", \
+"Pete Hegseth press conference"). Use the URLs returned directly by the tool — do NOT use article \
+page URLs from your research sources, as those are web pages, not images.
 
-End your output with a "## SOURCED B-ROLL IMAGES" section listing the images you found:
+End your output with a "## SOURCED B-ROLL IMAGES" section using only URLs returned by image_search_tool:
 
 ## SOURCED B-ROLL IMAGES
-1. https://... | short description of the image
-2. https://... | short description of the image
-3. https://... | short description of the image
+1. https://actual-image-url.jpg | short description of the image
+2. https://actual-image-url.jpg | short description of the image
+3. https://actual-image-url.jpg | short description of the image
 
-The script writer will pick from this list when placing b-roll markers.
+The script writer will pick from this list when placing b-roll markers. If image_search_tool \
+returns no results, omit the section entirely.
 """
