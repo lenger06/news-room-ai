@@ -84,7 +84,8 @@ Return:
   "desk": "desk slug that owns this story — must match one of the desk slugs above",
   "anchor_name": "anchor name if the request specifies one, otherwise null to use the desk's preferred anchor",
   "avatar_look": "description of the best look for this story, copied exactly from the anchor's look list above",
-  "extra_playlists": ["key1", "key2"]
+  "extra_playlists": ["key1", "key2"],
+  "target_duration_seconds": null
 }}
 
 Rules:
@@ -100,6 +101,9 @@ Rules:
   Use series keys if the story fits an ongoing coverage series.
   The desk playlist is always added automatically — do not include it here.
   Return [] if no extra playlists apply.
+- For target_duration_seconds: if the request mentions a desired length (e.g. "2 minutes", "90 seconds",
+  "short clip", "long segment"), convert to an integer number of seconds and set this field.
+  "short" = 60, "brief" = 60, "long" = 180, "extended" = 240. Otherwise set to null.
 
 Workflow step sets:
 - RESEARCH_ONLY:    ["researcher"]

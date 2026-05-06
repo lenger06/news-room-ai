@@ -46,6 +46,9 @@ class ProductionState(TypedDict):
     anchor_avatar_id: str
     anchor_voice_id: str
 
+    # Target video duration (seconds); None = let script_writer use its default
+    target_duration_seconds: Optional[int]
+
     # YouTube playlists
     playlist_ids: List[str]         # fully resolved IDs (automatic + EP picks)
     extra_playlist_keys: List[str]  # EP-selected keys from the playlists menu
@@ -160,10 +163,12 @@ class Agent(BaseAgent):
                 state["playlist_ids"] = resolve_playlist_ids(
                     state["desk"], anchor.name, workflow, state["topic"]
                 )
+                raw_dur = parsed.get("target_duration_seconds")
+                state["target_duration_seconds"] = int(raw_dur) if raw_dur else None
                 logger.info(
                     f"[EP] Workflow: {workflow} | Desk: {state['desk_name']} | "
                     f"Anchor: {anchor.name} | Look: {parsed.get('avatar_look', 'default')} | "
-                    f"Extra playlists: {state['extra_playlist_keys']} | Topic: {state['topic']}"
+                    f"Duration: {state['target_duration_seconds']}s | Topic: {state['topic']}"
                 )
             else:
                 state["workflow"] = "ARTICLE"
@@ -257,7 +262,7 @@ class Agent(BaseAgent):
                     f"AVATAR ID: {anchor_avatar_id}\n"
                     f"VOICE ID: {anchor_voice_id}\n"
                     f"BACKGROUND ASSET ID: {background_asset_id}\n"
-                    f"Use these exact avatar_id, voice_id, and background_asset_id values when calling generate_anchor_video."
+                    f"TOPIC: {state.get('topic', '')}\n"
                 )
             elif agent_name == "publisher":
                 import json as _json
