@@ -45,6 +45,9 @@ class ProductionState(TypedDict):
     anchor_name: str
     anchor_avatar_id: str
     anchor_voice_id: str
+    anchor_voice_emotion: str
+    anchor_talking_style: str
+    anchor_expression: str
 
     # Target video duration (seconds); None = let script_writer use its default
     target_duration_seconds: Optional[int]
@@ -159,6 +162,9 @@ class Agent(BaseAgent):
                 state["anchor_name"] = anchor.name
                 state["anchor_avatar_id"] = anchor.get_avatar_id(parsed.get("avatar_look"))
                 state["anchor_voice_id"] = anchor.voice_id
+                state["anchor_voice_emotion"] = anchor.voice_emotion or ""
+                state["anchor_talking_style"] = anchor.talking_style or ""
+                state["anchor_expression"] = anchor.expression or ""
                 state["extra_playlist_keys"] = parsed.get("extra_playlists") or []
                 state["playlist_ids"] = resolve_playlist_ids(
                     state["desk"], anchor.name, workflow, state["topic"]
@@ -182,6 +188,9 @@ class Agent(BaseAgent):
                 state["anchor_name"] = anchor.name
                 state["anchor_avatar_id"] = anchor.default_avatar_id
                 state["anchor_voice_id"] = anchor.voice_id
+                state["anchor_voice_emotion"] = anchor.voice_emotion or ""
+                state["anchor_talking_style"] = anchor.talking_style or ""
+                state["anchor_expression"] = anchor.expression or ""
                 state["extra_playlist_keys"] = []
                 state["playlist_ids"] = resolve_playlist_ids(
                     "national", anchor.name, "ARTICLE", state["topic"]
@@ -199,6 +208,9 @@ class Agent(BaseAgent):
             state["anchor_name"] = anchor.name
             state["anchor_avatar_id"] = anchor.default_avatar_id
             state["anchor_voice_id"] = anchor.voice_id
+            state["anchor_voice_emotion"] = anchor.voice_emotion or ""
+            state["anchor_talking_style"] = anchor.talking_style or ""
+            state["anchor_expression"] = anchor.expression or ""
             state["extra_playlist_keys"] = []
             state["playlist_ids"] = []
             state["error"] = str(e)
@@ -261,6 +273,9 @@ class Agent(BaseAgent):
                     f"\n\nANCHOR NAME: {anchor_name}\n"
                     f"AVATAR ID: {anchor_avatar_id}\n"
                     f"VOICE ID: {anchor_voice_id}\n"
+                    f"VOICE EMOTION: {state.get('anchor_voice_emotion', '')}\n"
+                    f"TALKING STYLE: {state.get('anchor_talking_style', '')}\n"
+                    f"EXPRESSION: {state.get('anchor_expression', '')}\n"
                     f"BACKGROUND ASSET ID: {background_asset_id}\n"
                     f"TOPIC: {state.get('topic', '')}\n"
                 )
@@ -413,6 +428,9 @@ class Agent(BaseAgent):
                 "anchor_name": "",
                 "anchor_avatar_id": "",
                 "anchor_voice_id": "",
+                "anchor_voice_emotion": "",
+                "anchor_talking_style": "",
+                "anchor_expression": "",
                 "playlist_ids": [],
                 "extra_playlist_keys": [],
                 "outputs": {},

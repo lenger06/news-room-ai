@@ -23,6 +23,9 @@ class Anchor:
     voice_id: str                   # HeyGen voice ID
     desk: str                       # Desk slug this anchor belongs to (see config/desks.py)
     bio: str                        # Short description for script-writer context (tone, style)
+    voice_emotion: Optional[str] = None   # "Excited" | "Friendly" | "Serious" | "Soothing" | "Broadcaster"
+    talking_style: Optional[str] = None  # "stable" | "expressive" (talking_photo avatars only)
+    expression: Optional[str] = None     # "default" | "happy" (talking_photo avatars only)
 
     @property
     def default_avatar_id(self) -> str:
@@ -57,18 +60,22 @@ ANCHORS: list[Anchor] = [
         voice_id="dc5370c68baa4905be87f702758df4b0",
         desk="national",
         bio="Lead anchor. Authoritative and composed. Delivers hard news with calm gravitas.",
+        voice_emotion="Broadcaster",
+        talking_style="stable",
     ),
     Anchor(
         name="Dominic Fairchild",
         avatars=[
-            AvatarLook("455c4dfb69564447a3bf0d860a875f8d", "informal shirt at entertainment desk — Entertainment, celebrity, culture, breaking stories"),
-
+            AvatarLook("36b7514f60e44b7192dfdae1db6273c1", "informal shirt at entertainment desk — Entertainment, celebrity, culture, breaking stories"),
             # AvatarLook("<avatar_id>", "standing in front of Capitol backdrop — election night and major votes"),
         ],
-        voice_id="c701a9c07ff74f7ca9d71cbd24abb3a1",
+        voice_id="d60b050b12d9478493d0bd689ee7547b",
         desk="politics",
         bio="Chief Political Correspondent. Sharp and precise. Covers the White House, Congress, and elections.",
-    ),    
+        voice_emotion="Friendly",
+        talking_style="expressive",
+        expression="happy",
+    ),
     Anchor(
         name="Rick Johnson",
         avatars=[
@@ -78,6 +85,8 @@ ANCHORS: list[Anchor] = [
         voice_id="c701a9c07ff74f7ca9d71cbd24abb3a1",
         desk="politics",
         bio="Chief Political Correspondent. Sharp and precise. Covers the White House, Congress, and elections.",
+        voice_emotion="Serious",
+        talking_style="stable",
     ),
     Anchor(
         name="Karoline Faye",
@@ -88,6 +97,9 @@ ANCHORS: list[Anchor] = [
         voice_id="5eb15f7ed1254e658faccf14e67f2cd9",
         desk="entertainment",
         bio="Entertainment Reporter. Warm and conversational. Covers culture, celebrity, film, and the arts.",
+        voice_emotion="Friendly",
+        talking_style="expressive",
+        expression="happy",
     ),
     Anchor(
         name="Shawn Green",
@@ -101,6 +113,8 @@ ANCHORS: list[Anchor] = [
         voice_id="e1a429dbe823406dbae5fa7c3612314d",
         desk="foreign",
         bio="Chief Foreign Correspondent. Measured and globally-informed. Covers international affairs and geopolitics.",
+        voice_emotion="Broadcaster",
+        talking_style="stable",
     ),
     Anchor(
         name="Brandon Jones",
@@ -111,6 +125,8 @@ ANCHORS: list[Anchor] = [
         voice_id="3787b4ab93174952a3ad649209f1029a",
         desk="business",
         bio="Business & Finance Correspondent. Clear and data-driven. Covers markets, economy, and corporate news.",
+        voice_emotion="Serious",
+        talking_style="stable",
     ),
     Anchor(
         name="Alister Blackwood",
@@ -121,6 +137,8 @@ ANCHORS: list[Anchor] = [
         voice_id="088da045d8114ca39add4a75df8ed9a0",
         desk="investigative",
         bio="Senior Investigative Correspondent. Deliberate and serious. Covers accountability journalism and systemic issues.",
+        voice_emotion="Serious",
+        talking_style="stable",
     ),
     Anchor(
         name="Darlene Smith",
@@ -131,6 +149,9 @@ ANCHORS: list[Anchor] = [
         voice_id="d6a657274b184772ac28a6146f729d3a",
         desk="health_science",
         bio="Health & Science Correspondent. Calm and accessible. Covers medicine, public health, and scientific research.",
+        voice_emotion="Excited",
+        talking_style="expressive",
+        expression="happy",
     ),
 
     # Add more anchors below:

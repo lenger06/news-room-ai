@@ -182,20 +182,26 @@ class Agent(BaseAgent):
 
     # ── HeyGen param extraction ──────────────────────────────────────────────
 
-    def _extract_heygen_params(self, message: str) -> tuple[str, str, str]:
-        """Parse AVATAR ID / VOICE ID / BACKGROUND ASSET ID injected by the executive producer."""
+    def _extract_heygen_params(self, message: str) -> tuple[str, str, str, str, str, str]:
+        """Parse HeyGen params injected by the executive producer."""
         def find(pattern):
             m = re.search(pattern, message, re.IGNORECASE)
             return m.group(1).strip() if m else ""
 
-        avatar_id = find(r'AVATAR ID[:\s]+([^\n]+)')
-        voice_id  = find(r'VOICE ID[:\s]+([^\n]+)')
-        bg_id     = find(r'BACKGROUND ASSET ID[:\s]+([^\n]+)')
+        avatar_id     = find(r'AVATAR ID[:\s]+([^\n]+)')
+        voice_id      = find(r'VOICE ID[:\s]+([^\n]+)')
+        bg_id         = find(r'BACKGROUND ASSET ID[:\s]+([^\n]+)')
+        voice_emotion = find(r'VOICE EMOTION[:\s]+([^\n]+)')
+        talking_style = find(r'TALKING STYLE[:\s]+([^\n]+)')
+        expression    = find(r'EXPRESSION[:\s]+([^\n]+)')
 
         return (
-            avatar_id or settings.HEYGEN_AVATAR_ID,
-            voice_id  or settings.HEYGEN_VOICE_ID,
-            bg_id     or "f6fa4085043140deaba8258a96233036",
+            avatar_id     or settings.HEYGEN_AVATAR_ID,
+            voice_id      or settings.HEYGEN_VOICE_ID,
+            bg_id         or "f6fa4085043140deaba8258a96233036",
+            voice_emotion,
+            talking_style,
+            expression,
         )
 
     # ── HeyGen polling ───────────────────────────────────────────────────────
@@ -275,7 +281,7 @@ class Agent(BaseAgent):
                 logger.warning(f"[anchor] Could not verify HeyGen credits: {credit_err}")
 
             # Step 1: Extract HeyGen params from the message
-            avatar_id, voice_id, bg_id = self._extract_heygen_params(message)
+            avatar_id, voice_id, bg_id, voice_emotion, talking_style, expression = self._extract_heygen_params(message)
 
             # Step 2: Extract the broadcast script from EP context, then clean it.
             # Prefer the inline === SCRIPT === block the script_writer appends; fall back to
@@ -315,6 +321,7 @@ class Agent(BaseAgent):
             submit_result = await asyncio.to_thread(
                 generate_video_multiscene,
                 segments, avatar_id, voice_id, bg_id, title,
+                voice_emotion, talking_style, expression,
             )
 
             if not submit_result.get("video_id"):

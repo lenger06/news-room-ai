@@ -446,6 +446,9 @@ def generate_video_multiscene(
     voice_id: str,
     background_asset_id: str,
     title: str = "News Segment",
+    voice_emotion: str = "",
+    talking_style: str = "",
+    expression: str = "",
 ) -> dict:
     """
     Build and submit a multi-scene HeyGen video (Studio API v2).
@@ -496,18 +499,28 @@ def generate_video_multiscene(
         else:
             background = {"type": "video", "video_asset_id": background_asset_id, "play_style": "loop"}
 
+        character = {
+            "type": "avatar",
+            "avatar_id": avatar_id,
+            "avatar_style": "normal",
+            "matting": True,
+        }
+        if talking_style:
+            character["talking_style"] = talking_style
+        if expression:
+            character["expression"] = expression
+
+        voice_obj = {
+            "type": "text",
+            "input_text": script[:5000],
+            "voice_id": voice_id,
+        }
+        if voice_emotion:
+            voice_obj["emotion"] = voice_emotion
+
         video_inputs.append({
-            "character": {
-                "type": "avatar",
-                "avatar_id": avatar_id,
-                "avatar_style": "normal",
-                "matting": True,
-            },
-            "voice": {
-                "type": "text",
-                "input_text": script[:5000],
-                "voice_id": voice_id,
-            },
+            "character": character,
+            "voice": voice_obj,
             "background": background,
         })
 
