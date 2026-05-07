@@ -41,7 +41,7 @@ DESKS: list[Desk] = [
         beat="International news, foreign affairs, overseas conflicts, diplomacy, geopolitics",
         preferred_anchors=["Shawn Green"],
         prompt_style="Measured, globally-informed delivery. Always provide geographic and political context.",
-        background_asset_id="fd85442af68942328b286d8709fe3c81",
+        background_asset_id="f6fa4085043140deaba8258a96233036",
     ),
     Desk(
         slug="business",
@@ -57,7 +57,7 @@ DESKS: list[Desk] = [
         beat="Entertainment industry, celebrity news, film, music, television, arts and culture",
         preferred_anchors=["Karoline Faye"],
         prompt_style="Warm, conversational, and engaging. Lighter tone — factual but not stiff.",
-        background_asset_id="fc275b8c8f7f4a0f8731242ea41730bd",
+        background_asset_id="4deccf8b1304429093cdce9880fd2a6f",
     ),
     Desk(
         slug="health_science",
@@ -73,7 +73,7 @@ DESKS: list[Desk] = [
         beat="Long-form accountability journalism, government oversight, corporate wrongdoing, systemic issues",
         preferred_anchors=["Alister Blackwood"],
         prompt_style="Deliberate, serious, and weighty. Build the story methodically. Every claim must be sourced.",
-        background_asset_id="fd85442af68942328b286d8709fe3c81",
+        background_asset_id="f6fa4085043140deaba8258a96233036",
     ),
 ]
 

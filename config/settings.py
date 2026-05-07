@@ -40,8 +40,11 @@ class Settings:
     # B-roll PiP compositing
     # Path to a still frame (JPEG/PNG) of the studio background used as the
     # composite base when showing b-roll in the upper-left corner.
-    # If not set, falls back to a blurred version of the b-roll image itself.
+    # Only used as a fallback when FFmpeg video compositing is unavailable.
     BROLL_BG_FRAME_PATH: str = os.getenv("BROLL_BG_FRAME_PATH", "")
+    # Studio background videos for FFmpeg PiP compositing:
+    # Place them in ./assets/ named after the HeyGen asset ID, e.g.:
+    #   ./assets/f6fa4085043140deaba8258a96233036.mp4
 
     @classmethod
     def validate(cls):

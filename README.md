@@ -100,7 +100,7 @@ The full report and verdict are passed to all downstream agents as context.
 Converts the verified article into a spoken broadcast anchor script. Formats it for on-air delivery: natural spoken English, breath-pause markers, phonetic pronunciations for difficult names, and `[GRAPHIC: ...]` cues for supporting visuals. Uses the selected anchor's name in the sign-off (e.g. "I'm Alex Morgan, Defy Logic News."). Target read time: 60–90 seconds. Saves to `./output/scripts/`.
 
 ### Anchor
-Takes the broadcast script, cleans it for spoken delivery, and submits it to HeyGen using the selected anchor's avatar and voice IDs. Polls for completion natively in Python (every 30 seconds, up to 10 minutes) — does not rely on the LLM to manage polling. Returns the video URL and thumbnail URL when complete.
+Takes the broadcast script, cleans it for spoken delivery, and submits it to HeyGen using the selected anchor's avatar and voice IDs. For scenes with `[BROLL:]` markers, b-roll images are composited as a Picture-in-Picture (426×240) over the desk's studio background video using FFmpeg, uploaded as a new HeyGen video asset, and used as the scene background. Falls back to a Pillow static image composite if FFmpeg is unavailable. Polls for completion natively in Python (every 30 seconds, up to 10 minutes) — does not rely on the LLM to manage polling. Returns the video URL and thumbnail URL when complete.
 
 ### Video Editor
 Downloads the completed anchor video from HeyGen, extracts all `[GRAPHIC: ...]` cues from the script, and assembles a `video_package.json` in `./output/media/` containing the video file path, thumbnail URL, graphic cues, and suggested YouTube metadata.
@@ -209,6 +209,16 @@ pip install -r requirements.txt
 5. On first run the Publisher agent will open a browser to authorize — token saved to `credentials/youtube_token.pickle`
 
 See [`credentials/README.md`](credentials/README.md) for full step-by-step setup instructions including OAuth consent screen configuration.
+
+### B-Roll Video Compositing
+
+The Anchor agent composites b-roll images as a Picture-in-Picture overlay on a studio background video using FFmpeg, then uploads the result to HeyGen as a video asset.
+
+- Place background videos in `./assets/` named after their HeyGen video asset ID (e.g. `./assets/f6fa4085043140deaba8258a96233036.mp4`)
+- Multiple backgrounds are supported — each desk automatically uses its configured `background_asset_id` from `config/desks.py`
+- Requires `imageio-ffmpeg` (already in `requirements.txt` — bundles FFmpeg, no system install needed)
+- Composite results are cached in `./cache/broll_composites/` so the same b-roll image won't re-encode on repeat runs
+- Falls back to a Pillow static image composite if FFmpeg is unavailable
 
 ### Environment Variables
 
