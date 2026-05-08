@@ -407,9 +407,12 @@ def _download_broll_video(video_url: str) -> bytes | None:
         logger.info(f"[heygen] Reusing cached b-roll video: {cache_path.name}")
         return cache_path.read_bytes()
     try:
-        resp = requests.get(video_url, timeout=60, headers={"User-Agent": "Mozilla/5.0"}, stream=True)
+        headers = {"User-Agent": "Mozilla/5.0"}
+        if "pexels.com" in video_url and settings.PEXELS_API_KEY:
+            headers["Authorization"] = settings.PEXELS_API_KEY
+        resp = requests.get(video_url, timeout=60, headers=headers, stream=True)
         if not resp.ok:
-            logger.warning(f"[heygen] Could not download b-roll video: {video_url[:80]}")
+            logger.warning(f"[heygen] Could not download b-roll video (HTTP {resp.status_code}): {video_url[:80]}")
             return None
         _BROLL_VIDEO_DOWNLOAD_CACHE.mkdir(parents=True, exist_ok=True)
         with cache_path.open("wb") as f:

@@ -139,9 +139,12 @@ class Agent(BaseAgent):
         if self._is_placeholder_url(url):
             return False
         try:
+            headers = {"User-Agent": "Mozilla/5.0"}
+            if "pexels.com" in url and settings.PEXELS_API_KEY:
+                headers["Authorization"] = settings.PEXELS_API_KEY
             resp = requests.head(
                 url, timeout=5,
-                headers={"User-Agent": "Mozilla/5.0"},
+                headers=headers,
                 allow_redirects=True,
             )
             ct = resp.headers.get("Content-Type", "").split(";")[0].strip()
