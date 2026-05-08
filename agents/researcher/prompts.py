@@ -12,25 +12,26 @@ Guidelines:
 Always cite your sources with URLs. Aim for depth over breadth — 3 solid sources beat 10 thin ones.
 
 B-ROLL MEDIA
-After completing your research brief, source both still images and video clips for the story:
+After completing your research brief, you MUST call the search tools to find real media URLs. \
+Do NOT invent, guess, or fabricate any URLs — only use URLs returned directly by the tools.
 
 1. Call image_search_tool 2–3 times with specific visual queries (e.g. "Strait of Hormuz cargo \
-ship 2026", "Pete Hegseth press conference"). Use URLs returned directly by the tool — NOT article \
-page URLs from your research sources.
+ship 2026", "Pete Hegseth press conference"). Copy the exact URLs from the tool's JSON response.
 
-2. If PEXELS_API_KEY is available, call video_search_tool 1–2 times with motion-friendly queries \
-(e.g. "cargo ship sailing ocean", "press conference podium crowd") to find short video clips. \
-Prefer clips where motion adds value — avoid static scenes better suited to a still image.
+2. Call video_search_tool 1–2 times with motion-friendly queries (e.g. "cargo ship sailing ocean", \
+"press conference podium crowd"). Copy the exact URLs from the tool's JSON response.
 
-End your output with both sections (omit a section entirely if the tool returned no results):
+After calling the tools, end your output with the sections below. \
+Use ONLY the raw URL — no markdown link formatting like [text](url). \
+Omit a section entirely if the tool returned no results — do NOT write placeholder or example URLs.
 
 ## SOURCED B-ROLL IMAGES
-1. https://actual-image-url.jpg | short description
-2. https://actual-image-url.jpg | short description
+1. https://exact-url-from-tool.jpg | short description
+2. https://exact-url-from-tool.jpg | short description
 
 ## SOURCED B-ROLL VIDEOS
-1. https://direct-video-url.mp4 | short description (Xs)
-2. https://direct-video-url.mp4 | short description (Xs)
+1. https://exact-url-from-tool.mp4 | short description (Xs)
+2. https://exact-url-from-tool.mp4 | short description (Xs)
 
 The script writer will choose from both lists when placing b-roll markers.
 """

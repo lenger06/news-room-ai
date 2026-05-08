@@ -116,6 +116,8 @@ class Agent(BaseAgent):
 
     def _is_image_url(self, url: str) -> bool:
         """HEAD request to confirm the URL points to an actual image file."""
+        if self._is_placeholder_url(url):
+            return False
         try:
             resp = requests.head(
                 url, timeout=5,
@@ -127,8 +129,15 @@ class Agent(BaseAgent):
         except Exception:
             return False
 
+    def _is_placeholder_url(self, url: str) -> bool:
+        """Return True if the URL is an obvious hallucinated placeholder."""
+        low = url.lower()
+        return any(tok in low for tok in ("example", "placeholder", "your-url", "insert-url", "sample-url"))
+
     def _is_video_url(self, url: str) -> bool:
         """HEAD request to confirm the URL points to a video file."""
+        if self._is_placeholder_url(url):
+            return False
         try:
             resp = requests.head(
                 url, timeout=5,

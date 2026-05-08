@@ -260,6 +260,7 @@ class Agent(BaseAgent):
             if agent_name == "script_writer" and anchor_name:
                 desk_name = state.get("desk_name", "")
                 desk_style = state.get("desk_prompt_style", "")
+                target_dur = state.get("target_duration_seconds")
                 step_input += (
                     f"\n\nDESK: {desk_name}\n"
                     f"DESK STYLE: {desk_style}\n"
@@ -267,6 +268,13 @@ class Agent(BaseAgent):
                     f"Write the script for {anchor_name} to read. "
                     f"Use their name in the sign-off line instead of [ANCHOR]."
                 )
+                if target_dur:
+                    target_words = round(target_dur * 150 / 60)
+                    step_input += (
+                        f"\nTARGET DURATION: {target_dur} seconds "
+                        f"(approximately {target_words} words). "
+                        f"This overrides the default read-time target."
+                    )
             elif agent_name == "anchor" and anchor_avatar_id:
                 background_asset_id = state.get("desk_background_asset_id", "")
                 step_input += (
@@ -431,6 +439,7 @@ class Agent(BaseAgent):
                 "anchor_voice_emotion": "",
                 "anchor_talking_style": "",
                 "anchor_expression": "",
+                "target_duration_seconds": None,
                 "playlist_ids": [],
                 "extra_playlist_keys": [],
                 "outputs": {},
