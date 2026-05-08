@@ -12,6 +12,7 @@ from agents.registry import BaseAgent, AgentInfo
 from agents.researcher.prompts import RESEARCHER_PROMPT
 from tools.web_research_tool import web_research_tool
 from tools.image_search_tool import image_search_tool
+from tools.video_search_tool import video_search_tool
 from tools.file_operations_tool import file_operations_tool
 from config.settings import settings
 import logging
@@ -24,7 +25,7 @@ class Agent(BaseAgent):
 
     def __init__(self):
         self.llm = ChatOpenAI(model="gpt-4o", temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
-        self.tools = [web_research_tool, image_search_tool, file_operations_tool]
+        self.tools = [web_research_tool, image_search_tool, video_search_tool, file_operations_tool]
         prompt = ChatPromptTemplate.from_messages([
             ("system", RESEARCHER_PROMPT),
             MessagesPlaceholder("chat_history", optional=True),

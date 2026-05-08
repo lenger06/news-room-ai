@@ -64,39 +64,41 @@ class Agent(BaseAgent):
             SystemMessage(content=self._system_prompt),
             HumanMessage(content=message),
         ])
-        return response.content.strip()
+        text = response.content.strip()
+        # Strip markdown formatting characters that TTS would read aloud
+        text = re.sub(r'\*+|_+|`+|#{1,6}\s*', '', text)
+        return text
 
     # ── B-roll parsing ───────────────────────────────────────────────────────
 
     def _parse_segments(self, script: str) -> list[dict]:
         """
         Split on [BROLL:] markers. Each anchor text segment AFTER a marker is
-        paired with that marker's image. Marker content can be:
-          "https://... | description"  — pre-sourced URL from researcher
-          "search query"               — fallback: anchor will search for an image
+        paired with that marker's media. Marker content can be:
+          "https://... | description"         — pre-sourced image URL
+          "https://... | description | video" — pre-sourced video clip URL
+          "search query"                      — fallback: anchor will search for an image
         """
         parts = re.split(r'\[BROLL:\s*([^\]]+)\]', script, flags=re.IGNORECASE)
         segments = []
         pending_url = None
         pending_desc = None
+        pending_media_type = "image"
         for i, part in enumerate(parts):
             if i % 2 == 1:
                 content = part.strip()
-                if '|' in content:
-                    url_part, desc_part = content.split('|', 1)
-                    url_part = url_part.strip()
-                    if url_part.startswith('http'):
-                        pending_url = url_part
-                        pending_desc = desc_part.strip()
-                    else:
-                        pending_url = None
-                        pending_desc = content
-                elif content.startswith('http'):
-                    pending_url = content
-                    pending_desc = None
+                fields = [f.strip() for f in content.split('|')]
+                url_part = fields[0]
+                desc_part = fields[1] if len(fields) > 1 else ""
+                type_hint = fields[2].lower() if len(fields) > 2 else "image"
+                if url_part.startswith('http'):
+                    pending_url = url_part
+                    pending_desc = desc_part or None
+                    pending_media_type = "video" if type_hint == "video" else "image"
                 else:
                     pending_url = None
-                    pending_desc = content
+                    pending_desc = content  # treat whole content as search query
+                    pending_media_type = "image"
             else:
                 text = part.strip()
                 if text:
@@ -104,10 +106,12 @@ class Agent(BaseAgent):
                         "type": "anchor",
                         "script": text,
                         "broll_description": pending_desc,
-                        "image_url": pending_url,
+                        "image_url": pending_url if pending_media_type == "image" else None,
+                        "video_url": pending_url if pending_media_type == "video" else None,
                     })
                 pending_url = None
                 pending_desc = None
+                pending_media_type = "image"
         return segments
 
     def _is_image_url(self, url: str) -> bool:
@@ -120,6 +124,23 @@ class Agent(BaseAgent):
             )
             ct = resp.headers.get("Content-Type", "").split(";")[0].strip()
             return ct.startswith("image/")
+        except Exception:
+            return False
+
+    def _is_video_url(self, url: str) -> bool:
+        """HEAD request to confirm the URL points to a video file."""
+        try:
+            resp = requests.head(
+                url, timeout=5,
+                headers={"User-Agent": "Mozilla/5.0"},
+                allow_redirects=True,
+            )
+            ct = resp.headers.get("Content-Type", "").split(";")[0].strip()
+            if ct.startswith("video/"):
+                return True
+            # CDN URLs may return application/octet-stream — check extension as fallback
+            path = url.split("?")[0].lower()
+            return any(path.endswith(ext) for ext in (".mp4", ".mov", ".webm", ".avi"))
         except Exception:
             return False
 
@@ -148,34 +169,44 @@ class Agent(BaseAgent):
             logger.warning(f"[anchor] Image search failed for '{query}': {e}")
             return None
 
-    async def _resolve_broll_images(self, segments: list[dict]) -> list[dict]:
+    async def _resolve_broll_media(self, segments: list[dict]) -> list[dict]:
         """
-        Ensure every b-roll segment has a valid image_url.
-        Pre-sourced URLs are validated with a HEAD request; if not a real image
-        (e.g. researcher passed an article URL), fall back to Tavily search.
-        Description-only segments always use Tavily search.
+        Validate every b-roll segment's media URL.
+        - Video URLs: validated via HEAD request / extension check.
+        - Image URLs: validated via HEAD request; invalid ones fall back to Tavily search.
+        - Description-only segments: Tavily image search.
         """
         resolved = []
         for seg in segments:
             desc = seg.get("broll_description")
-            url = seg.get("image_url")
+            video_url = seg.get("video_url")
+            image_url = seg.get("image_url")
 
-            if url:
-                valid = await asyncio.to_thread(self._is_image_url, url)
+            if video_url:
+                valid = await asyncio.to_thread(self._is_video_url, video_url)
                 if valid:
-                    logger.info(f"[anchor] B-roll pre-sourced OK: '{desc}' → {url[:80]}")
+                    logger.info(f"[anchor] B-roll video OK: '{desc}' → {video_url[:80]}")
                 else:
-                    logger.warning(f"[anchor] Pre-sourced URL is not an image — falling back to search: {url[:80]}")
-                    seg["image_url"] = None
-                    url = None
+                    logger.warning(f"[anchor] Video URL invalid — falling back to image search: {video_url[:80]}")
+                    seg["video_url"] = None
+                    video_url = None
 
-            if not url and desc:
+            if not video_url and image_url:
+                valid = await asyncio.to_thread(self._is_image_url, image_url)
+                if valid:
+                    logger.info(f"[anchor] B-roll image OK: '{desc}' → {image_url[:80]}")
+                else:
+                    logger.warning(f"[anchor] Image URL invalid — falling back to search: {image_url[:80]}")
+                    seg["image_url"] = None
+                    image_url = None
+
+            if not video_url and not image_url and desc:
                 found = await asyncio.to_thread(self._search_image_sync, desc)
                 if found:
                     seg["image_url"] = found
-                    logger.info(f"[anchor] B-roll searched: '{desc}' → {found}")
+                    logger.info(f"[anchor] B-roll image searched: '{desc}' → {found}")
                 else:
-                    logger.warning(f"[anchor] No image found for '{desc}' — using studio background")
+                    logger.warning(f"[anchor] No media found for '{desc}' — using studio background")
 
             resolved.append(seg)
         return resolved
@@ -307,12 +338,14 @@ class Agent(BaseAgent):
             segments = self._parse_segments(cleaned)
             has_broll = any(s.get("broll_description") for s in segments)
             n_studio = sum(1 for s in segments if not s.get("broll_description"))
-            n_broll = sum(1 for s in segments if s.get("broll_description"))
-            logger.info(f"[anchor] Segments: {len(segments)} ({n_studio} studio bg, {n_broll} with b-roll image)")
+            n_images = sum(1 for s in segments if s.get("image_url"))
+            n_videos = sum(1 for s in segments if s.get("video_url"))
+            n_search = sum(1 for s in segments if s.get("broll_description") and not s.get("image_url") and not s.get("video_url"))
+            logger.info(f"[anchor] Segments: {len(segments)} ({n_studio} studio, {n_images} image b-roll, {n_videos} video b-roll, {n_search} to search)")
 
-            # Step 4: Resolve b-roll image URLs
+            # Step 4: Resolve b-roll media URLs
             if has_broll:
-                segments = await self._resolve_broll_images(segments)
+                segments = await self._resolve_broll_media(segments)
 
             # Step 5: Submit to HeyGen
             title = re.search(r'TOPIC[:\s]+([^\n]+)', message, re.IGNORECASE)

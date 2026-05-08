@@ -13,6 +13,7 @@ class Settings:
 
     # Search
     TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
+    PEXELS_API_KEY: str = os.getenv("PEXELS_API_KEY", "")  # for video b-roll search
 
     # HeyGen (anchor video generation)
     # HEYGEN_AVATAR_ID / HEYGEN_VOICE_ID are kept as fallback for the generate_anchor_video tool

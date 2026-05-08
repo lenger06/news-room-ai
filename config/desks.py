@@ -25,7 +25,7 @@ DESKS: list[Desk] = [
         beat="Domestic US news, general hard news, lead stories, breaking national events",
         preferred_anchors=["Alex Morgan"],
         prompt_style="Authoritative, straight-down-the-middle hard news. Lead with impact.",
-        background_asset_id="f6fa4085043140deaba8258a96233036",
+        background_asset_id="fd85442af68942328b286d8709fe3c81",
     ),
     Desk(
         slug="politics",
@@ -33,7 +33,7 @@ DESKS: list[Desk] = [
         beat="Domestic politics, elections, Congress, presidential coverage, executive branch, policy",
         preferred_anchors=["Rick Johnson"],
         prompt_style="Sharp, precise political reporting. Cite sources and policy details. Strictly neutral tone.",
-        background_asset_id="f6fa4085043140deaba8258a96233036",
+        background_asset_id="fd85442af68942328b286d8709fe3c81",
     ),
     Desk(
         slug="foreign",
@@ -41,7 +41,7 @@ DESKS: list[Desk] = [
         beat="International news, foreign affairs, overseas conflicts, diplomacy, geopolitics",
         preferred_anchors=["Shawn Green"],
         prompt_style="Measured, globally-informed delivery. Always provide geographic and political context.",
-        background_asset_id="f6fa4085043140deaba8258a96233036",
+        background_asset_id="fd85442af68942328b286d8709fe3c81",
     ),
     Desk(
         slug="business",
@@ -49,7 +49,7 @@ DESKS: list[Desk] = [
         beat="Markets, economy, corporate news, trade, financial policy, economic indicators",
         preferred_anchors=["Brandon Jones"],
         prompt_style="Clear, data-driven reporting. Define financial terms for a general audience.",
-        background_asset_id="f6fa4085043140deaba8258a96233036",
+        background_asset_id="fd85442af68942328b286d8709fe3c81",
     ),
     Desk(
         slug="entertainment",
@@ -65,7 +65,7 @@ DESKS: list[Desk] = [
         beat="Medical news, public health, scientific research, technology breakthroughs, environment",
         preferred_anchors=["Darlene Smith"],
         prompt_style="Accessible and calm. Translate technical findings clearly for general viewers.",
-        background_asset_id="f6fa4085043140deaba8258a96233036",
+        background_asset_id="fd85442af68942328b286d8709fe3c81",
     ),
     Desk(
         slug="investigative",
@@ -73,7 +73,7 @@ DESKS: list[Desk] = [
         beat="Long-form accountability journalism, government oversight, corporate wrongdoing, systemic issues",
         preferred_anchors=["Alister Blackwood"],
         prompt_style="Deliberate, serious, and weighty. Build the story methodically. Every claim must be sourced.",
-        background_asset_id="f6fa4085043140deaba8258a96233036",
+        background_asset_id="fd85442af68942328b286d8709fe3c81",
     ),
 ]
 

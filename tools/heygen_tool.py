@@ -39,14 +39,15 @@ HEYGEN_UPLOAD_URL = "https://upload.heygen.com"
 
 # PiP layout constants (for b-roll upper-left inset)
 _FRAME_W, _FRAME_H = 1280, 720
-_PIP_W, _PIP_H     = 426, 240   # ~1/3 of frame width, 16:9 — visually ~1/6 of screen
+_PIP_W, _PIP_H     = 639, 360   # ~1/2 of frame width, 16:9 — visually ~1/4 of screen
 _PIP_PADDING       = 24          # pixels from top-left edges
 
 # FFmpeg composite video cache
-_CACHE_DIR              = Path("./cache")
-_BG_VIDEO_CACHE         = _CACHE_DIR / "bg_videos"
-_BROLL_COMPOSITE_CACHE  = _CACHE_DIR / "broll_composites"
-_COMPOSITE_DURATION_S   = 15     # seconds; HeyGen loops via play_style:loop
+_CACHE_DIR                  = Path("./cache")
+_BG_VIDEO_CACHE             = _CACHE_DIR / "bg_videos"
+_BROLL_COMPOSITE_CACHE      = _CACHE_DIR / "broll_composites"
+_BROLL_VIDEO_DOWNLOAD_CACHE = _CACHE_DIR / "broll_video_downloads"
+_COMPOSITE_DURATION_S       = 15     # seconds; HeyGen loops via play_style:loop
 
 
 def _load_bg_frame() -> bytes | None:
@@ -95,13 +96,18 @@ def _create_pip_composite(image_bytes: bytes, bg_bytes: bytes | None = None) -> 
             bg = Image.blend(bg, black, alpha=0.45)
             logger.info("[heygen] No studio background frame configured — using blurred b-roll")
 
-        # Sharp PiP inset in upper-left
-        pip = src.resize((_PIP_W, _PIP_H), Image.LANCZOS)
+        # Sharp PiP inset in upper-left — preserve original aspect ratio
+        orig_w, orig_h = src.size
+        if orig_w * _PIP_H > orig_h * _PIP_W:
+            pip_w, pip_h = _PIP_W, max(1, round(_PIP_W * orig_h / orig_w))
+        else:
+            pip_w, pip_h = max(1, round(_PIP_H * orig_w / orig_h)), _PIP_H
+        pip = src.resize((pip_w, pip_h), Image.LANCZOS)
         bg.paste(pip, (_PIP_PADDING, _PIP_PADDING))
 
         out = _io.BytesIO()
         bg.save(out, format="JPEG", quality=88)
-        logger.info(f"[heygen] PiP composite created ({_PIP_W}×{_PIP_H} inset on {_FRAME_W}×{_FRAME_H} frame)")
+        logger.info(f"[heygen] PiP composite created ({pip_w}×{pip_h} inset on {_FRAME_W}×{_FRAME_H} frame)")
         return out.getvalue()
     except Exception as e:
         logger.warning(f"[heygen] PiP composite failed: {e}")
@@ -367,7 +373,7 @@ def _create_broll_video_composite(broll_image_bytes: bytes, bg_video_bytes: byte
                 "-stream_loop", "-1", "-i", str(bg_path),
                 "-loop", "1",        "-i", str(img_path),
                 "-filter_complex",
-                f"[1:v]scale={_PIP_W}:{_PIP_H}[pip];[0:v][pip]overlay={_PIP_PADDING}:{_PIP_PADDING}",
+                f"[1:v]scale={_PIP_W}:{_PIP_H}:force_original_aspect_ratio=decrease[pip];[0:v][pip]overlay={_PIP_PADDING}:{_PIP_PADDING}",
                 "-t", str(_COMPOSITE_DURATION_S),
                 "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                 "-pix_fmt", "yuv420p",
@@ -390,53 +396,133 @@ def _create_broll_video_composite(broll_image_bytes: bytes, bg_video_bytes: byte
         return None
 
 
-def create_broll_video_asset(image_url: str, background_asset_id: str) -> str | None:
+def _download_broll_video(video_url: str) -> bytes | None:
     """
-    Full pipeline: download b-roll image + background video → FFmpeg composite →
+    Download a b-roll video clip, caching it to disk to avoid re-downloading.
+    Returns raw MP4 bytes, or None on failure.
+    """
+    url_hash = hashlib.md5(video_url.encode()).hexdigest()[:16]
+    cache_path = _BROLL_VIDEO_DOWNLOAD_CACHE / f"{url_hash}.mp4"
+    if cache_path.exists():
+        logger.info(f"[heygen] Reusing cached b-roll video: {cache_path.name}")
+        return cache_path.read_bytes()
+    try:
+        resp = requests.get(video_url, timeout=60, headers={"User-Agent": "Mozilla/5.0"}, stream=True)
+        if not resp.ok:
+            logger.warning(f"[heygen] Could not download b-roll video: {video_url[:80]}")
+            return None
+        _BROLL_VIDEO_DOWNLOAD_CACHE.mkdir(parents=True, exist_ok=True)
+        with cache_path.open("wb") as f:
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                f.write(chunk)
+        video_bytes = cache_path.read_bytes()
+        logger.info(f"[heygen] Downloaded b-roll video ({len(video_bytes):,} bytes) → {cache_path.name}")
+        return video_bytes
+    except Exception as e:
+        logger.warning(f"[heygen] Failed to download b-roll video: {e}")
+        cache_path.unlink(missing_ok=True)
+        return None
+
+
+def _create_broll_video_composite_from_video(broll_video_bytes: bytes, bg_video_bytes: bytes) -> bytes | None:
+    """
+    FFmpeg: overlay a looping b-roll video clip as a PiP in the upper-left of the background video.
+    Produces a {_COMPOSITE_DURATION_S}s MP4 (HeyGen will loop it). Audio is stripped.
+    Returns MP4 bytes, or None on failure.
+    """
+    ffmpeg = _get_ffmpeg_exe()
+    if not ffmpeg:
+        return None
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            bg_path    = tmp / "bg.mp4"
+            broll_path = tmp / "broll.mp4"
+            out_path   = tmp / "composite.mp4"
+
+            bg_path.write_bytes(bg_video_bytes)
+            broll_path.write_bytes(broll_video_bytes)
+
+            cmd = [
+                ffmpeg, "-y",
+                "-stream_loop", "-1", "-i", str(bg_path),
+                "-stream_loop", "-1", "-i", str(broll_path),
+                "-filter_complex",
+                f"[1:v]scale={_PIP_W}:{_PIP_H}:force_original_aspect_ratio=decrease[pip];"
+                f"[0:v][pip]overlay={_PIP_PADDING}:{_PIP_PADDING}",
+                "-t", str(_COMPOSITE_DURATION_S),
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                "-an",
+                str(out_path),
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, timeout=180)
+            if result.returncode != 0:
+                logger.warning(f"[heygen] FFmpeg (video pip) failed (rc={result.returncode}): "
+                               f"{result.stderr.decode(errors='replace')[-600:]}")
+                return None
+
+            video_bytes = out_path.read_bytes()
+            logger.info(f"[heygen] FFmpeg video PiP composite: {_COMPOSITE_DURATION_S}s MP4 ({len(video_bytes):,} bytes)")
+            return video_bytes
+    except Exception as e:
+        logger.warning(f"[heygen] _create_broll_video_composite_from_video error: {e}")
+        return None
+
+
+def create_broll_video_asset(media_url: str, background_asset_id: str, media_type: str = "image") -> str | None:
+    """
+    Full pipeline: download b-roll media + background video → FFmpeg PiP composite →
     upload to HeyGen → return video asset_id.
-    Returns None on any failure so the caller can fall back to image composite.
+
+    media_type: "image" (default) or "video"
+    Returns None on any failure so the caller can fall back gracefully.
     """
-    # Deduplicate: cache by (asset_id_prefix, image_url_hash)
-    img_hash   = hashlib.md5(image_url.encode()).hexdigest()[:12]
-    bg_prefix  = background_asset_id[:12] if background_asset_id else "default"
-    cache_path = _BROLL_COMPOSITE_CACHE / f"{bg_prefix}_{img_hash}.asset_id"
+    # Cache key includes media_type to avoid collisions between image and video URLs
+    url_hash  = hashlib.md5(f"{media_type}:{media_url}".encode()).hexdigest()[:12]
+    bg_prefix = background_asset_id[:12] if background_asset_id else "default"
+    cache_path = _BROLL_COMPOSITE_CACHE / f"{bg_prefix}_{url_hash}.asset_id"
     if cache_path.exists():
         cached_id = cache_path.read_text().strip()
         if cached_id:
             logger.info(f"[heygen] Reusing cached composite asset_id={cached_id}")
             return cached_id
 
-    # Download b-roll image
-    try:
-        img_resp = requests.get(image_url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
-        if not img_resp.ok or not img_resp.content:
-            logger.warning(f"[heygen] Could not download b-roll image: {image_url[:80]}")
-            return None
-        ct = img_resp.headers.get("Content-Type", "").split(";")[0].strip()
-        if not ct.startswith("image/"):
-            logger.warning(f"[heygen] B-roll URL is not an image (Content-Type: {ct!r})")
-            return None
-        image_bytes = img_resp.content
-    except Exception as e:
-        logger.warning(f"[heygen] Failed to download b-roll image: {e}")
-        return None
-
     # Get background video
     bg_bytes = _get_background_video_bytes(background_asset_id)
     if not bg_bytes:
         return None
 
-    # FFmpeg composite
-    composite_bytes = _create_broll_video_composite(image_bytes, bg_bytes)
+    if media_type == "video":
+        broll_bytes = _download_broll_video(media_url)
+        if not broll_bytes:
+            return None
+        composite_bytes = _create_broll_video_composite_from_video(broll_bytes, bg_bytes)
+    else:
+        # Download b-roll image
+        try:
+            img_resp = requests.get(media_url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+            if not img_resp.ok or not img_resp.content:
+                logger.warning(f"[heygen] Could not download b-roll image: {media_url[:80]}")
+                return None
+            ct = img_resp.headers.get("Content-Type", "").split(";")[0].strip()
+            if not ct.startswith("image/"):
+                logger.warning(f"[heygen] B-roll URL is not an image (Content-Type: {ct!r})")
+                return None
+            composite_bytes = _create_broll_video_composite(img_resp.content, bg_bytes)
+        except Exception as e:
+            logger.warning(f"[heygen] Failed to download b-roll image: {e}")
+            return None
+
     if not composite_bytes:
         return None
 
-    # Upload
     asset_id = _upload_video_asset(composite_bytes)
     if asset_id:
         _BROLL_COMPOSITE_CACHE.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(asset_id)
-
     return asset_id
 
 
@@ -480,15 +566,25 @@ def generate_video_multiscene(
         if not script:
             continue
 
+        video_url = (seg.get("video_url") or "").strip()
         image_url = (seg.get("image_url") or "").strip()
-        if image_url:
-            # Prefer FFmpeg video composite (background video + PiP image)
-            video_asset_id = create_broll_video_asset(image_url, background_asset_id)
+
+        if video_url:
+            # B-roll is a video clip — FFmpeg composite only (no PIL fallback for video)
+            video_asset_id = create_broll_video_asset(video_url, background_asset_id, media_type="video")
             if video_asset_id:
                 background = {"type": "video", "video_asset_id": video_asset_id, "play_style": "loop"}
-                logger.info(f"[heygen] Using FFmpeg video composite: {video_asset_id}")
+                logger.info(f"[heygen] Using FFmpeg video PiP composite (clip): {video_asset_id}")
             else:
-                # Fall back to static image composite
+                logger.warning("[heygen] Video b-roll composite failed — using studio background")
+                background = {"type": "video", "video_asset_id": background_asset_id, "play_style": "loop"}
+        elif image_url:
+            # B-roll is a still image — try FFmpeg composite, fall back to PIL
+            video_asset_id = create_broll_video_asset(image_url, background_asset_id, media_type="image")
+            if video_asset_id:
+                background = {"type": "video", "video_asset_id": video_asset_id, "play_style": "loop"}
+                logger.info(f"[heygen] Using FFmpeg video PiP composite (image): {video_asset_id}")
+            else:
                 logger.info("[heygen] FFmpeg composite unavailable — falling back to image composite")
                 asset_id = upload_image_to_heygen(image_url, pip_composite=True, bg_bytes=bg_frame)
                 if asset_id:
