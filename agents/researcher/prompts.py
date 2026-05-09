@@ -21,17 +21,19 @@ ship 2026", "Pete Hegseth press conference"). Copy the exact URLs from the tool'
 2. Call video_search_tool 1–2 times with motion-friendly queries (e.g. "cargo ship sailing ocean", \
 "press conference podium crowd"). Copy the exact URLs from the tool's JSON response.
 
-After calling the tools, end your output with the sections below. \
-Use ONLY the raw URL — no markdown link formatting like [text](url). \
-Omit a section entirely if the tool returned no results — do NOT write placeholder or example URLs.
+After calling the tools, append two sections at the end of your output — one for images, one for videos. \
+Rules:
+- Use ONLY raw URLs returned directly by the tool — no markdown, no angle brackets, no invented URLs.
+- Each line: raw URL | plain description (no brackets, no formatting)
+- Video lines also include the clip duration: raw URL | plain description | Xs
+- If a tool returned no results, omit that entire section — do NOT write any URL at all.
+- NEVER copy the section headers or format examples as content. Only write lines when you have real tool-returned URLs.
 
 ## SOURCED B-ROLL IMAGES
-1. https://exact-url-from-tool.jpg | short description
-2. https://exact-url-from-tool.jpg | short description
+(one line per image: <raw URL from tool> | <plain description>)
 
 ## SOURCED B-ROLL VIDEOS
-1. https://exact-url-from-tool.mp4 | short description (Xs)
-2. https://exact-url-from-tool.mp4 | short description (Xs)
+(one line per clip: <raw URL from tool> | <plain description> | <duration>s)
 
 The script writer will choose from both lists when placing b-roll markers.
 """

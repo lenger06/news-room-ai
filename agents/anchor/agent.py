@@ -137,7 +137,10 @@ class Agent(BaseAgent):
     def _is_placeholder_url(self, url: str) -> bool:
         """Return True if the URL is a hallucinated placeholder or a blocked social-media domain."""
         low = url.lower()
-        if any(tok in low for tok in ("example", "placeholder", "your-url", "insert-url", "sample-url")):
+        if any(tok in low for tok in (
+            "example", "placeholder", "your-url", "insert-url", "sample-url",
+            "exact-url", "from-tool", "url-here", "image-url", "video-url",
+        )):
             return True
         return any(domain in low for domain in self._BLOCKED_DOMAINS)
 
