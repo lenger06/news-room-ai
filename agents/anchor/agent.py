@@ -129,22 +129,26 @@ class Agent(BaseAgent):
         except Exception:
             return False
 
+    _BLOCKED_DOMAINS = (
+        "lookaside.instagram.com", "lookaside.fbsbx.com", "facebook.com",
+        "instagram.com", "twitter.com", "x.com", "tiktok.com",
+    )
+
     def _is_placeholder_url(self, url: str) -> bool:
-        """Return True if the URL is an obvious hallucinated placeholder."""
+        """Return True if the URL is a hallucinated placeholder or a blocked social-media domain."""
         low = url.lower()
-        return any(tok in low for tok in ("example", "placeholder", "your-url", "insert-url", "sample-url"))
+        if any(tok in low for tok in ("example", "placeholder", "your-url", "insert-url", "sample-url")):
+            return True
+        return any(domain in low for domain in self._BLOCKED_DOMAINS)
 
     def _is_video_url(self, url: str) -> bool:
         """HEAD request to confirm the URL points to a video file."""
         if self._is_placeholder_url(url):
             return False
         try:
-            headers = {"User-Agent": "Mozilla/5.0"}
-            if "pexels.com" in url and settings.PEXELS_API_KEY:
-                headers["Authorization"] = settings.PEXELS_API_KEY
             resp = requests.head(
                 url, timeout=5,
-                headers=headers,
+                headers={"User-Agent": "Mozilla/5.0"},
                 allow_redirects=True,
             )
             ct = resp.headers.get("Content-Type", "").split(";")[0].strip()
@@ -173,10 +177,11 @@ class Agent(BaseAgent):
             if not resp.ok:
                 return None
             images = resp.json().get("images", [])
-            if not images:
-                return None
-            first = images[0]
-            return first.get("url") if isinstance(first, dict) else first
+            for img in images:
+                url = img.get("url") if isinstance(img, dict) else img
+                if url and not self._is_placeholder_url(url):
+                    return url
+            return None
         except Exception as e:
             logger.warning(f"[anchor] Image search failed for '{query}': {e}")
             return None

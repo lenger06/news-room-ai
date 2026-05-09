@@ -7,6 +7,26 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# Pixabay offers a simple, free video API with direct CDN URLs that download
+# without any authorization headers — unlike Pexels whose CDN returns 403.
+_PIXABAY_VIDEO_URL = "https://pixabay.com/api/videos/"
+
+
+def _pick_resolution(video_hit: dict) -> dict | None:
+    """Pick the best resolution <= 720p from a Pixabay video hit's 'videos' dict."""
+    vids = video_hit.get("videos", {})
+    # Prefer large (1920×1080 downscaled) → medium (1280×720) → small → tiny
+    for key in ("large", "medium", "small", "tiny"):
+        v = vids.get(key)
+        if v and v.get("url") and v.get("height", 9999) <= 720:
+            return v
+    # Fall back to any available tier
+    for key in ("large", "medium", "small", "tiny"):
+        v = vids.get(key)
+        if v and v.get("url"):
+            return v
+    return None
+
 
 @tool
 def video_search_tool(
@@ -23,47 +43,41 @@ def video_search_tool(
     Returns:
         JSON string with direct video file URLs, descriptions, and durations
     """
-    if not settings.PEXELS_API_KEY:
-        return json.dumps({"error": "PEXELS_API_KEY not configured", "videos": []})
+    if not settings.PIXABAY_API_KEY:
+        return json.dumps({"error": "PIXABAY_API_KEY not configured", "videos": []})
 
     try:
         response = requests.get(
-            "https://api.pexels.com/videos/search",
-            headers={"Authorization": settings.PEXELS_API_KEY},
+            _PIXABAY_VIDEO_URL,
             params={
-                "query": query,
-                "per_page": min(num_results or 3, 5),
-                "orientation": "landscape",
-                "size": "medium",
+                "key": settings.PIXABAY_API_KEY,
+                "q": query,
+                "per_page": min(num_results or 3, 10),
+                "video_type": "film",
+                "orientation": "horizontal",
             },
             timeout=15,
         )
         if not response.ok:
-            logger.warning(f"[video_search_tool] Pexels HTTP {response.status_code}: {response.text[:200]}")
+            logger.warning(f"[video_search_tool] Pixabay HTTP {response.status_code}: {response.text[:200]}")
             return json.dumps({"error": f"HTTP {response.status_code}", "videos": []})
 
         data = response.json()
         videos = []
-        for v in data.get("videos", []):
-            files = v.get("video_files", [])
-            # Prefer HD (720p) landscape files; avoid ultra-high-res to keep download sizes sane
-            landscape = [f for f in files if f.get("width", 0) >= f.get("height", 1)]
-            hd = next(
-                (f for f in sorted(landscape, key=lambda f: f.get("width", 0))
-                 if f.get("height", 0) <= 720),
-                landscape[0] if landscape else (files[0] if files else None),
-            )
-            if hd and hd.get("link"):
-                # Build a readable description from the Pexels page URL slug
-                slug = v.get("url", "").rstrip("/").split("/")[-1]
-                description = slug.replace("-", " ").strip() or query
-                videos.append({
-                    "url": hd["link"],
-                    "description": description,
-                    "duration_seconds": v.get("duration", 0),
-                    "width": hd.get("width", 0),
-                    "height": hd.get("height", 0),
-                })
+        for hit in data.get("hits", []):
+            chosen = _pick_resolution(hit)
+            if not chosen:
+                continue
+            tags = hit.get("tags", "").strip() or query
+            videos.append({
+                "url": chosen["url"],
+                "description": tags,
+                "duration_seconds": hit.get("duration", 0),
+                "width": chosen.get("width", 0),
+                "height": chosen.get("height", 0),
+            })
+            if len(videos) >= (num_results or 3):
+                break
 
         logger.info(f"[video_search_tool] {len(videos)} clips for: {query!r}")
         return json.dumps({"videos": videos, "query": query})

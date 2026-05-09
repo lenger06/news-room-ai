@@ -235,7 +235,7 @@ NEWSROOM_NAME="Defy Logic News"
 
 OPENAI_API_KEY="sk-..."
 TAVILY_API_KEY="tvly-..."
-PEXELS_API_KEY=""          # Free at pexels.com/api — enables video b-roll search
+PIXABAY_API_KEY=""         # Free at pixabay.com/api — enables video b-roll search
 
 HEYGEN_API_KEY="sk_..."
 

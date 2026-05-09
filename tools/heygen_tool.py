@@ -408,8 +408,6 @@ def _download_broll_video(video_url: str) -> bytes | None:
         return cache_path.read_bytes()
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
-        if "pexels.com" in video_url and settings.PEXELS_API_KEY:
-            headers["Authorization"] = settings.PEXELS_API_KEY
         resp = requests.get(video_url, timeout=60, headers=headers, stream=True)
         if not resp.ok:
             logger.warning(f"[heygen] Could not download b-roll video (HTTP {resp.status_code}): {video_url[:80]}")
