@@ -175,19 +175,21 @@ class Agent(BaseAgent):
         return any(domain in low for domain in self._BLOCKED_DOMAINS)
 
     def _is_video_url(self, url: str) -> bool:
-        """HEAD request to confirm the URL points to a video file."""
+        """HEAD request to confirm the URL points to a downloadable video file."""
         if self._is_placeholder_url(url):
             return False
         try:
-            resp = requests.head(
-                url, timeout=5,
-                headers={"User-Agent": "Mozilla/5.0"},
-                allow_redirects=True,
-            )
+            hdrs = {"User-Agent": "Mozilla/5.0"}
+            if "pixabay.com" in url:
+                hdrs["Referer"] = "https://pixabay.com/"
+            resp = requests.head(url, timeout=8, headers=hdrs, allow_redirects=True)
+            if not resp.ok:
+                logger.debug(f"[anchor] _is_video_url HEAD {resp.status_code}: {url[:80]}")
+                return False
             ct = resp.headers.get("Content-Type", "").split(";")[0].strip()
-            if ct.startswith("video/"):
+            if ct.startswith("video/") or ct == "application/octet-stream":
                 return True
-            # CDN URLs may return application/octet-stream — check extension as fallback
+            # Some CDNs return generic content-type; trust extension only on 2xx
             path = url.split("?")[0].lower()
             return any(path.endswith(ext) for ext in (".mp4", ".mov", ".webm", ".avi"))
         except Exception:
