@@ -52,7 +52,7 @@ def video_search_tool(
             params={
                 "key": settings.PIXABAY_API_KEY,
                 "q": query,
-                "per_page": min(num_results or 3, 10),
+                "per_page": max(3, min(num_results or 3, 200)),
                 "video_type": "film",
                 "orientation": "horizontal",
             },

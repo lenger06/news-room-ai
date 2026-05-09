@@ -43,18 +43,31 @@ def image_search_tool(
         data = response.json()
         raw_images = data.get("images", [])
 
+        _BLOCKED = (
+            "lookaside.instagram.com", "lookaside.fbsbx.com",
+            "facebook.com", "instagram.com", "twitter.com", "x.com", "tiktok.com",
+        )
+
         images = []
-        for item in raw_images[:min(num_results or 3, 5)]:
+        for item in raw_images:
+            if len(images) >= min(num_results or 3, 5):
+                break
+            if isinstance(item, dict):
+                url = item.get("url", "")
+            elif isinstance(item, str):
+                url = item
+            else:
+                continue
+            if not url or any(d in url.lower() for d in _BLOCKED):
+                continue
             if isinstance(item, dict):
                 images.append({
-                    "url": item.get("url", ""),
+                    "url": url,
                     "caption": item.get("description") or query,
-                    "thumbnail": item.get("url", ""),
+                    "thumbnail": url,
                 })
-            elif isinstance(item, str):
-                images.append({"url": item, "caption": query, "thumbnail": item})
-
-        images = [img for img in images if img["url"]]
+            else:
+                images.append({"url": url, "caption": query, "thumbnail": url})
         logger.info(f"[image_search_tool] {len(images)} images for: {query}")
         return json.dumps({"images": images, "query": query})
 
