@@ -65,8 +65,17 @@ class Agent(BaseAgent):
             HumanMessage(content=message),
         ])
         text = response.content.strip()
-        # Strip markdown formatting characters that TTS would read aloud
+        # Strip markdown formatting characters that TTS would read aloud.
+        # Preserve [BROLL:...] markers verbatim — their URLs contain underscores
+        # that must not be stripped by the _+ part of the regex.
+        broll_markers: list[str] = []
+        def _stash_broll(m: re.Match) -> str:
+            broll_markers.append(m.group(0))
+            return f"\x00BROLL{len(broll_markers)-1}\x00"
+        text = re.sub(r'\[BROLL:[^\]]*\]', _stash_broll, text, flags=re.IGNORECASE)
         text = re.sub(r'\*+|_+|`+|#{1,6}\s*', '', text)
+        for i, marker in enumerate(broll_markers):
+            text = text.replace(f"\x00BROLL{i}\x00", marker)
         return text
 
     # ── B-roll parsing ───────────────────────────────────────────────────────

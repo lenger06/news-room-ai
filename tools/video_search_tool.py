@@ -68,9 +68,11 @@ def video_search_tool(
             chosen = _pick_resolution(hit)
             if not chosen:
                 continue
+            raw_url = chosen.get("url", "")
+            logger.debug(f"[video_search_tool] Pixabay raw URL: {raw_url}")
             tags = hit.get("tags", "").strip() or query
             videos.append({
-                "url": chosen["url"],
+                "url": raw_url,
                 "description": tags,
                 "duration_seconds": hit.get("duration", 0),
                 "width": chosen.get("width", 0),
