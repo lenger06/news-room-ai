@@ -114,18 +114,48 @@ class Agent(BaseAgent):
                 pending_media_type = "image"
         return segments
 
+    _IMAGE_MAGIC = {
+        b"\xff\xd8\xff": "jpeg",
+        b"\x89PNG": "png",
+        b"GIF8": "gif",
+        b"RIFF": "webp",  # RIFF....WEBP
+        b"\x00\x00\x00": "heic",
+    }
+
     def _is_image_url(self, url: str) -> bool:
-        """HEAD request to confirm the URL points to an actual image file."""
+        """Confirm the URL points to an actual image via HEAD, then partial GET as fallback."""
         if self._is_placeholder_url(url):
             return False
+        hdrs = {"User-Agent": "Mozilla/5.0"}
         try:
-            resp = requests.head(
-                url, timeout=5,
-                headers={"User-Agent": "Mozilla/5.0"},
-                allow_redirects=True,
-            )
+            resp = requests.head(url, timeout=6, headers=hdrs, allow_redirects=True)
             ct = resp.headers.get("Content-Type", "").split(";")[0].strip()
-            return ct.startswith("image/")
+            if ct.startswith("image/"):
+                return True
+            # Some CDNs (Euronews, AP, etc.) return text/html or no type on HEAD.
+            # Try a partial GET to read the first few bytes and check magic numbers.
+            if resp.status_code in (200, 206, 301, 302, 403, 404):
+                pass  # continue to partial-GET below only on uncertain responses
+            if resp.status_code == 404:
+                return False
+        except Exception:
+            pass
+        try:
+            resp = requests.get(
+                url, timeout=8, headers={**hdrs, "Range": "bytes=0-511"},
+                allow_redirects=True, stream=True,
+            )
+            if not resp.ok:
+                return False
+            ct = resp.headers.get("Content-Type", "").split(";")[0].strip()
+            if ct.startswith("image/"):
+                return True
+            # Check magic bytes
+            chunk = b""
+            for data in resp.iter_content(chunk_size=512):
+                chunk += data
+                break
+            return any(chunk.startswith(magic) for magic in self._IMAGE_MAGIC)
         except Exception:
             return False
 
@@ -163,8 +193,8 @@ class Agent(BaseAgent):
         except Exception:
             return False
 
-    def _search_image_sync(self, query: str) -> str | None:
-        """Fetch the first image URL for a query via Tavily."""
+    def _search_image_sync(self, query: str, exclude: set[str] | None = None) -> str | None:
+        """Fetch the first usable image URL for a query via Tavily, skipping excluded URLs."""
         if not settings.TAVILY_API_KEY:
             return None
         try:
@@ -174,7 +204,7 @@ class Agent(BaseAgent):
                 "search_depth": "basic",
                 "include_images": True,
                 "include_image_descriptions": False,
-                "max_results": 3,
+                "max_results": 5,
             }
             resp = requests.post("https://api.tavily.com/search", json=payload, timeout=15)
             if not resp.ok:
@@ -182,7 +212,7 @@ class Agent(BaseAgent):
             images = resp.json().get("images", [])
             for img in images:
                 url = img.get("url") if isinstance(img, dict) else img
-                if url and not self._is_placeholder_url(url):
+                if url and not self._is_placeholder_url(url) and url not in (exclude or set()):
                     return url
             return None
         except Exception as e:
@@ -193,10 +223,13 @@ class Agent(BaseAgent):
         """
         Validate every b-roll segment's media URL.
         - Video URLs: validated via HEAD request / extension check.
-        - Image URLs: validated via HEAD request; invalid ones fall back to Tavily search.
+        - Image URLs: validated via HEAD or partial-GET; invalid ones fall back to Tavily search.
         - Description-only segments: Tavily image search.
+        Tracks already-assigned image URLs to avoid returning the same photo for every segment.
         """
         resolved = []
+        used_image_urls: set[str] = set()
+
         for seg in segments:
             desc = seg.get("broll_description")
             video_url = seg.get("video_url")
@@ -215,15 +248,17 @@ class Agent(BaseAgent):
                 valid = await asyncio.to_thread(self._is_image_url, image_url)
                 if valid:
                     logger.info(f"[anchor] B-roll image OK: '{desc}' → {image_url[:80]}")
+                    used_image_urls.add(image_url)
                 else:
                     logger.warning(f"[anchor] Image URL invalid — falling back to search: {image_url[:80]}")
                     seg["image_url"] = None
                     image_url = None
 
             if not video_url and not image_url and desc:
-                found = await asyncio.to_thread(self._search_image_sync, desc)
+                found = await asyncio.to_thread(self._search_image_sync, desc, used_image_urls)
                 if found:
                     seg["image_url"] = found
+                    used_image_urls.add(found)
                     logger.info(f"[anchor] B-roll image searched: '{desc}' → {found}")
                 else:
                     logger.warning(f"[anchor] No media found for '{desc}' — using studio background")
