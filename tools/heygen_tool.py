@@ -327,6 +327,29 @@ def _upload_video_asset(video_bytes: bytes) -> str | None:
         return None
 
 
+def delete_heygen_asset(asset_id: str) -> bool:
+    """
+    Delete a HeyGen asset by ID. Returns True on success.
+    Also removes the local composite cache file so the asset won't be reused.
+    """
+    if not settings.HEYGEN_API_KEY or not asset_id:
+        return False
+    try:
+        resp = requests.delete(
+            f"{HEYGEN_BASE_URL}/v1/asset/{asset_id}",
+            headers={"x-api-key": settings.HEYGEN_API_KEY},
+            timeout=15,
+        )
+        if resp.ok:
+            logger.info(f"[heygen] Deleted asset {asset_id}")
+            return True
+        logger.warning(f"[heygen] Delete asset {asset_id} failed: HTTP {resp.status_code} {resp.text[:200]}")
+        return False
+    except Exception as e:
+        logger.warning(f"[heygen] delete_heygen_asset error: {e}")
+        return False
+
+
 def _get_ffmpeg_exe() -> str | None:
     """Return path to ffmpeg executable, trying system PATH then imageio-ffmpeg."""
     # System PATH
@@ -475,33 +498,37 @@ def _create_broll_video_composite_from_video(broll_video_bytes: bytes, bg_video_
         return None
 
 
-def create_broll_video_asset(media_url: str, background_asset_id: str, media_type: str = "image") -> str | None:
+def create_broll_video_asset(
+    media_url: str, background_asset_id: str, media_type: str = "image"
+) -> tuple[str | None, Path | None, bool]:
     """
     Full pipeline: download b-roll media + background video → FFmpeg PiP composite →
-    upload to HeyGen → return video asset_id.
+    upload to HeyGen → return (asset_id, cache_path, is_fresh_upload).
 
     media_type: "image" (default) or "video"
-    Returns None on any failure so the caller can fall back gracefully.
+    is_fresh_upload: True when a new asset was uploaded this call; False when
+                     the asset_id came from the local cache.
+    Returns (None, None, False) on any failure.
     """
     # Cache key includes media_type to avoid collisions between image and video URLs
-    url_hash  = hashlib.md5(f"{media_type}:{media_url}".encode()).hexdigest()[:12]
-    bg_prefix = background_asset_id[:12] if background_asset_id else "default"
+    url_hash   = hashlib.md5(f"{media_type}:{media_url}".encode()).hexdigest()[:12]
+    bg_prefix  = background_asset_id[:12] if background_asset_id else "default"
     cache_path = _BROLL_COMPOSITE_CACHE / f"{bg_prefix}_{url_hash}.asset_id"
     if cache_path.exists():
         cached_id = cache_path.read_text().strip()
         if cached_id:
             logger.info(f"[heygen] Reusing cached composite asset_id={cached_id}")
-            return cached_id
+            return cached_id, cache_path, False
 
     # Get background video
     bg_bytes = _get_background_video_bytes(background_asset_id)
     if not bg_bytes:
-        return None
+        return None, None, False
 
     if media_type == "video":
         broll_bytes = _download_broll_video(media_url)
         if not broll_bytes:
-            return None
+            return None, None, False
         composite_bytes = _create_broll_video_composite_from_video(broll_bytes, bg_bytes)
     else:
         # Download b-roll image
@@ -509,24 +536,25 @@ def create_broll_video_asset(media_url: str, background_asset_id: str, media_typ
             img_resp = requests.get(media_url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
             if not img_resp.ok or not img_resp.content:
                 logger.warning(f"[heygen] Could not download b-roll image: {media_url[:80]}")
-                return None
+                return None, None, False
             ct = img_resp.headers.get("Content-Type", "").split(";")[0].strip()
             if not ct.startswith("image/"):
                 logger.warning(f"[heygen] B-roll URL is not an image (Content-Type: {ct!r})")
-                return None
+                return None, None, False
             composite_bytes = _create_broll_video_composite(img_resp.content, bg_bytes)
         except Exception as e:
             logger.warning(f"[heygen] Failed to download b-roll image: {e}")
-            return None
+            return None, None, False
 
     if not composite_bytes:
-        return None
+        return None, None, False
 
     asset_id = _upload_video_asset(composite_bytes)
     if asset_id:
         _BROLL_COMPOSITE_CACHE.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(asset_id)
-    return asset_id
+        return asset_id, cache_path, True
+    return None, None, False
 
 
 def generate_video_multiscene(
@@ -564,6 +592,10 @@ def generate_video_multiscene(
     bg_frame = _load_bg_frame()
 
     video_inputs = []
+    # Track freshly uploaded composite assets so the caller can delete them after render.
+    # Each entry: {"asset_id": str, "cache_path": Path}
+    uploaded_composites: list[dict] = []
+
     for seg in segments:
         script = (seg.get("script") or "").strip()
         if not script:
@@ -574,23 +606,28 @@ def generate_video_multiscene(
 
         if video_url:
             # B-roll is a video clip — FFmpeg composite only (no PIL fallback for video)
-            video_asset_id = create_broll_video_asset(video_url, background_asset_id, media_type="video")
-            if video_asset_id:
-                background = {"type": "video", "video_asset_id": video_asset_id, "play_style": "loop"}
-                logger.info(f"[heygen] Using FFmpeg video PiP composite (clip): {video_asset_id}")
+            asset_id, cache_path, is_fresh = create_broll_video_asset(video_url, background_asset_id, media_type="video")
+            if asset_id:
+                if is_fresh:
+                    uploaded_composites.append({"asset_id": asset_id, "cache_path": cache_path})
+                background = {"type": "video", "video_asset_id": asset_id, "play_style": "loop"}
+                logger.info(f"[heygen] Using FFmpeg video PiP composite (clip): {asset_id}")
             else:
                 logger.warning("[heygen] Video b-roll composite failed — using studio background")
                 background = {"type": "video", "video_asset_id": background_asset_id, "play_style": "loop"}
         elif image_url:
             # B-roll is a still image — try FFmpeg composite, fall back to PIL
-            video_asset_id = create_broll_video_asset(image_url, background_asset_id, media_type="image")
-            if video_asset_id:
-                background = {"type": "video", "video_asset_id": video_asset_id, "play_style": "loop"}
-                logger.info(f"[heygen] Using FFmpeg video PiP composite (image): {video_asset_id}")
+            asset_id, cache_path, is_fresh = create_broll_video_asset(image_url, background_asset_id, media_type="image")
+            if asset_id:
+                if is_fresh:
+                    uploaded_composites.append({"asset_id": asset_id, "cache_path": cache_path})
+                background = {"type": "video", "video_asset_id": asset_id, "play_style": "loop"}
+                logger.info(f"[heygen] Using FFmpeg video PiP composite (image): {asset_id}")
             else:
                 logger.info("[heygen] FFmpeg composite unavailable — falling back to image composite")
                 asset_id = upload_image_to_heygen(image_url, pip_composite=True, bg_bytes=bg_frame)
                 if asset_id:
+                    uploaded_composites.append({"asset_id": asset_id, "cache_path": None})
                     background = {"type": "image", "image_asset_id": asset_id}
                 else:
                     logger.warning("[heygen] All b-roll compositing failed — using studio background")
@@ -649,7 +686,12 @@ def generate_video_multiscene(
         data = response.json()
         video_id = data.get("data", {}).get("video_id") or data.get("video_id")
         logger.info(f"[heygen] Multi-scene video submitted: {video_id} ({len(video_inputs)} scenes)")
-        return {"video_id": video_id, "status": "processing", "scene_count": len(video_inputs)}
+        return {
+            "video_id": video_id,
+            "status": "processing",
+            "scene_count": len(video_inputs),
+            "uploaded_composites": uploaded_composites,
+        }
 
     except Exception as e:
         logger.error(f"[heygen] multiscene generate error: {e}", exc_info=True)

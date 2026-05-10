@@ -13,7 +13,7 @@ import requests
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from agents.registry import BaseAgent, AgentInfo
-from tools.heygen_tool import get_heygen_credits, generate_video_multiscene
+from tools.heygen_tool import get_heygen_credits, generate_video_multiscene, delete_heygen_asset
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -455,6 +455,23 @@ class Agent(BaseAgent):
                     "agent": "anchor",
                     "video_id": video_id,
                 }
+
+            # Step 7: Clean up temporary composite assets from HeyGen
+            uploaded_composites = submit_result.get("uploaded_composites", [])
+            if uploaded_composites:
+                logger.info(f"[anchor] Cleaning up {len(uploaded_composites)} uploaded composite asset(s)...")
+                for entry in uploaded_composites:
+                    aid = entry.get("asset_id")
+                    cpath = entry.get("cache_path")
+                    if aid:
+                        deleted = await asyncio.to_thread(delete_heygen_asset, aid)
+                        if deleted and cpath:
+                            try:
+                                from pathlib import Path as _Path
+                                _Path(cpath).unlink(missing_ok=True)
+                                logger.info(f"[anchor] Removed composite cache: {cpath}")
+                            except Exception:
+                                pass
 
             video_url = poll_result.get("video_url", "")
             thumbnail_url = poll_result.get("thumbnail_url", "")
