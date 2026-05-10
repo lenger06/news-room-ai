@@ -215,6 +215,7 @@ class Agent(BaseAgent):
             payload = {
                 "api_key": settings.TAVILY_API_KEY,
                 "query": query,
+                "topic": "news",
                 "search_depth": "basic",
                 "include_images": True,
                 "include_image_descriptions": False,

@@ -30,10 +30,11 @@ def image_search_tool(
         payload = {
             "api_key": settings.TAVILY_API_KEY,
             "query": query,
+            "topic": "news",
             "search_depth": "basic",
             "include_images": True,
             "include_image_descriptions": True,
-            "max_results": 3,
+            "max_results": 5,
         }
         response = requests.post("https://api.tavily.com/search", json=payload, timeout=15)
 
