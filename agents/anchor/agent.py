@@ -106,7 +106,10 @@ class Agent(BaseAgent):
                     pending_media_type = "video" if type_hint == "video" else "image"
                 else:
                     pending_url = None
-                    pending_desc = content  # treat whole content as search query
+                    # When there's no URL, use the description field as the Tavily
+                    # search query if it exists — it's more specific than the first field,
+                    # which the script writer often fills with literal placeholder text.
+                    pending_desc = desc_part if desc_part else url_part
                     pending_media_type = "image"
             else:
                 text = part.strip()
