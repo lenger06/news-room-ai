@@ -83,7 +83,7 @@ Have Shawn Green anchor the White House briefing video
 The orchestrator. Receives every production request, determines the appropriate workflow, selects an anchor from the roster, and delegates to the team in sequence. Saves a full production log to `./output/production_logs/` at the end of every run.
 
 ### Researcher
-Gathers source material using real-time web search (Tavily). Searches for multiple angles — latest developments, background context, key figures, and statistics. Compiles a sourced research brief with URLs. Also sources b-roll media: still images via Tavily and short video clips via the Pexels API (if configured). Outputs a `## SOURCED B-ROLL IMAGES` and `## SOURCED B-ROLL VIDEOS` section for the script writer to choose from.
+Gathers source material using real-time web search (Tavily). Searches for multiple angles — latest developments, background context, key figures, and statistics. Compiles a sourced research brief with URLs. Also sources b-roll media: still images via Tavily and short video clips via the Pixabay API (if configured). Outputs a `## SOURCED B-ROLL IMAGES` and `## SOURCED B-ROLL VIDEOS` section for the script writer to choose from.
 
 ### Writer
 Receives the research brief and writes a polished news article in broadcast style — inverted pyramid structure, active voice, short sentences, 400–600 words. Includes a branded dateline (e.g. "WASHINGTON — Defy Logic News"). Saves to `./output/articles/`.
