@@ -13,7 +13,8 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 
 _PROMO_PATH = Path("./assets/promo_with_audio.mp4")
-# Target resolution — match HeyGen's output so the promo scales down to fit
+_OUTRO_PATH = Path("./assets/outro.mp4")
+# Target resolution — match HeyGen's native output; promo/outro scale down to fit
 _OUT_W, _OUT_H, _OUT_FPS = 1280, 720, 30
 
 
@@ -34,37 +35,51 @@ def _get_ffmpeg() -> str | None:
     return None
 
 
-def prepend_promo(broadcast_path: Path) -> Path | None:
+def assemble_final_video(broadcast_path: Path) -> Path | None:
     """
-    Concatenate promo_with_audio.mp4 + broadcast MP4 into a single final video.
-    Both clips are scaled/padded to _OUT_W × _OUT_H at _OUT_FPS before concat.
-    Returns the path to the final file, or None if the promo is missing / FFmpeg fails.
+    Assemble the final broadcast video:  [promo] + broadcast + [outro]
+    Promo and outro are optional — each is included only if its file exists in ./assets/.
+    All clips are scaled to _OUT_W × _OUT_H at _OUT_FPS (straight scale, no letterbox —
+    all assets should be 16:9).
+    Returns the path to the assembled file, or None if nothing to assemble / FFmpeg fails.
     """
-    if not _PROMO_PATH.exists():
-        logger.info(f"[video_editor] No promo found at {_PROMO_PATH} — skipping intro prepend")
+    has_promo = _PROMO_PATH.exists()
+    has_outro = _OUTRO_PATH.exists()
+
+    if not has_promo and not has_outro:
+        logger.info("[video_editor] No promo or outro found — skipping assembly")
         return None
 
     ffmpeg = _get_ffmpeg()
     if not ffmpeg:
-        logger.warning("[video_editor] FFmpeg not found — skipping intro prepend")
+        logger.warning("[video_editor] FFmpeg not found — skipping assembly")
         return None
 
-    out_path = broadcast_path.parent / f"final_{broadcast_path.stem}.mp4"
+    # Build ordered clip list: promo (opt) → broadcast → outro (opt)
+    clips: list[Path] = []
+    if has_promo:
+        clips.append(_PROMO_PATH)
+    clips.append(broadcast_path)
+    if has_outro:
+        clips.append(_OUTRO_PATH)
 
-    # Scale both clips to the same resolution (no padding — both are 16:9),
-    # normalise frame rate and audio sample rate, then hard-concat.
+    n = len(clips)
     scale = f"scale={_OUT_W}:{_OUT_H},fps={_OUT_FPS},setsar=1"
-    filter_complex = (
-        f"[0:v]{scale}[v0];"
-        f"[1:v]{scale}[v1];"
-        f"[0:a]aresample=44100,aformat=sample_fmts=fltp[a0];"
-        f"[1:a]aresample=44100,aformat=sample_fmts=fltp[a1];"
-        f"[v0][a0][v1][a1]concat=n=2:v=1:a=1[vout][aout]"
-    )
-    cmd = [
-        ffmpeg, "-y",
-        "-i", str(_PROMO_PATH),
-        "-i", str(broadcast_path),
+
+    # Build filter_complex dynamically for n inputs
+    parts = []
+    for i in range(n):
+        parts.append(f"[{i}:v]{scale}[v{i}]")
+        parts.append(f"[{i}:a]aresample=44100,aformat=sample_fmts=fltp[a{i}]")
+    stream_pairs = "".join(f"[v{i}][a{i}]" for i in range(n))
+    parts.append(f"{stream_pairs}concat=n={n}:v=1:a=1[vout][aout]")
+    filter_complex = ";".join(parts)
+
+    out_path = broadcast_path.parent / f"final_{broadcast_path.stem}.mp4"
+    cmd = [ffmpeg, "-y"]
+    for clip in clips:
+        cmd += ["-i", str(clip)]
+    cmd += [
         "-filter_complex", filter_complex,
         "-map", "[vout]", "-map", "[aout]",
         "-c:v", "libx264", "-preset", "fast", "-crf", "20",
@@ -73,21 +88,29 @@ def prepend_promo(broadcast_path: Path) -> Path | None:
         str(out_path),
     ]
 
-    logger.info(f"[video_editor] Prepending promo → {out_path.name}")
+    parts_desc = " + ".join(
+        ("promo" if c == _PROMO_PATH else "outro" if c == _OUTRO_PATH else "broadcast")
+        for c in clips
+    )
+    logger.info(f"[video_editor] Assembling: {parts_desc} → {out_path.name}")
     try:
         result = subprocess.run(cmd, capture_output=True, timeout=600)
         if result.returncode != 0:
             logger.warning(
-                f"[video_editor] FFmpeg concat failed (rc={result.returncode}): "
+                f"[video_editor] FFmpeg assembly failed (rc={result.returncode}): "
                 f"{result.stderr.decode(errors='replace')[-800:]}"
             )
             return None
         size = out_path.stat().st_size
-        logger.info(f"[video_editor] Final video with intro: {out_path.name} ({size:,} bytes)")
+        logger.info(f"[video_editor] Assembled final video ({size:,} bytes): {out_path.name}")
         return out_path
     except Exception as e:
-        logger.warning(f"[video_editor] prepend_promo error: {e}")
+        logger.warning(f"[video_editor] assemble_final_video error: {e}")
         return None
+
+
+# Keep old name as alias so nothing else breaks
+prepend_promo = assemble_final_video
 
 
 @tool

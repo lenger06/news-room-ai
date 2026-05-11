@@ -12,7 +12,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_openai import ChatOpenAI
 from agents.registry import BaseAgent, AgentInfo
 from agents.video_editor.prompts import VIDEO_EDITOR_PROMPT
-from tools.video_tools import download_video, extract_graphic_cues, save_video_package, prepend_promo
+from tools.video_tools import download_video, extract_graphic_cues, save_video_package, assemble_final_video
 from tools.file_operations_tool import file_operations_tool
 from config.settings import settings
 
@@ -58,13 +58,13 @@ class Agent(BaseAgent):
                     pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
                     broadcast_path = Path(pkg.get("video_file", ""))
                     if broadcast_path.exists():
-                        final_path = prepend_promo(broadcast_path)
+                        final_path = assemble_final_video(broadcast_path)
                         if final_path:
                             pkg["video_file"] = str(final_path)
                             pkg["promo_prepended"] = True
                             pkg_path.write_text(json.dumps(pkg, indent=2), encoding="utf-8")
                             logger.info(f"[video_editor] video_package.json updated → {final_path.name}")
-                            response_text += f"\nPromo intro prepended → {final_path.name}"
+                            response_text += f"\nFinal video assembled → {final_path.name}"
                 except Exception as e:
                     logger.warning(f"[video_editor] Promo prepend post-step failed: {e}")
 
