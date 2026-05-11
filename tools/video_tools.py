@@ -4,11 +4,94 @@ import logging
 import requests
 import json
 import re
+import subprocess
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+_PROMO_PATH = Path("./assets/promo_with_audio.mp4")
+# Target resolution for the final video — match the promo's native resolution
+_OUT_W, _OUT_H, _OUT_FPS = 1920, 1080, 30
+
+
+def _get_ffmpeg() -> str | None:
+    """Return the FFmpeg executable path (system PATH or imageio-ffmpeg bundle)."""
+    try:
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        return "ffmpeg"
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pass
+    try:
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe:
+            return exe
+    except Exception:
+        pass
+    return None
+
+
+def prepend_promo(broadcast_path: Path) -> Path | None:
+    """
+    Concatenate promo_with_audio.mp4 + broadcast MP4 into a single final video.
+    Both clips are scaled/padded to _OUT_W × _OUT_H at _OUT_FPS before concat.
+    Returns the path to the final file, or None if the promo is missing / FFmpeg fails.
+    """
+    if not _PROMO_PATH.exists():
+        logger.info(f"[video_editor] No promo found at {_PROMO_PATH} — skipping intro prepend")
+        return None
+
+    ffmpeg = _get_ffmpeg()
+    if not ffmpeg:
+        logger.warning("[video_editor] FFmpeg not found — skipping intro prepend")
+        return None
+
+    out_path = broadcast_path.parent / f"final_{broadcast_path.stem}.mp4"
+
+    # Scale both clips to the same resolution with letterbox padding, normalise frame
+    # rate and audio sample rate, then hard-concat with the concat filter.
+    scale_pad = (
+        f"scale={_OUT_W}:{_OUT_H}:force_original_aspect_ratio=decrease,"
+        f"pad={_OUT_W}:{_OUT_H}:(ow-iw)/2:(oh-ih)/2,"
+        f"fps={_OUT_FPS},setsar=1"
+    )
+    filter_complex = (
+        f"[0:v]{scale_pad}[v0];"
+        f"[1:v]{scale_pad}[v1];"
+        f"[0:a]aresample=44100,aformat=sample_fmts=fltp[a0];"
+        f"[1:a]aresample=44100,aformat=sample_fmts=fltp[a1];"
+        f"[v0][a0][v1][a1]concat=n=2:v=1:a=1[vout][aout]"
+    )
+    cmd = [
+        ffmpeg, "-y",
+        "-i", str(_PROMO_PATH),
+        "-i", str(broadcast_path),
+        "-filter_complex", filter_complex,
+        "-map", "[vout]", "-map", "[aout]",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        str(out_path),
+    ]
+
+    logger.info(f"[video_editor] Prepending promo → {out_path.name}")
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=600)
+        if result.returncode != 0:
+            logger.warning(
+                f"[video_editor] FFmpeg concat failed (rc={result.returncode}): "
+                f"{result.stderr.decode(errors='replace')[-800:]}"
+            )
+            return None
+        size = out_path.stat().st_size
+        logger.info(f"[video_editor] Final video with intro: {out_path.name} ({size:,} bytes)")
+        return out_path
+    except Exception as e:
+        logger.warning(f"[video_editor] prepend_promo error: {e}")
+        return None
 
 
 @tool

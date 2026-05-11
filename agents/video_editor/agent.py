@@ -5,13 +5,14 @@ project_root = Path(__file__).parent.parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+import json
 import logging
 from langchain.agents import create_openai_functions_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_openai import ChatOpenAI
 from agents.registry import BaseAgent, AgentInfo
 from agents.video_editor.prompts import VIDEO_EDITOR_PROMPT
-from tools.video_tools import download_video, extract_graphic_cues, save_video_package
+from tools.video_tools import download_video, extract_graphic_cues, save_video_package, prepend_promo
 from tools.file_operations_tool import file_operations_tool
 from config.settings import settings
 
@@ -47,7 +48,27 @@ class Agent(BaseAgent):
     async def process_message(self, message: str, context: dict = None) -> dict:
         try:
             result = self.executor.invoke({"input": message, "chat_history": []})
-            return {"success": True, "response": result.get("output", ""), "agent": "video_editor"}
+            response_text = result.get("output", "")
+
+            # After the LLM has downloaded the broadcast and saved video_package.json,
+            # prepend the promo intro unconditionally (if the promo file exists).
+            pkg_path = Path(settings.MEDIA_DIR) / "video_package.json"
+            if pkg_path.exists():
+                try:
+                    pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
+                    broadcast_path = Path(pkg.get("video_file", ""))
+                    if broadcast_path.exists():
+                        final_path = prepend_promo(broadcast_path)
+                        if final_path:
+                            pkg["video_file"] = str(final_path)
+                            pkg["promo_prepended"] = True
+                            pkg_path.write_text(json.dumps(pkg, indent=2), encoding="utf-8")
+                            logger.info(f"[video_editor] video_package.json updated → {final_path.name}")
+                            response_text += f"\nPromo intro prepended → {final_path.name}"
+                except Exception as e:
+                    logger.warning(f"[video_editor] Promo prepend post-step failed: {e}")
+
+            return {"success": True, "response": response_text, "agent": "video_editor"}
         except Exception as e:
             logger.error(f"Video Editor error: {e}", exc_info=True)
             return {"success": False, "response": f"Video editing failed: {str(e)}", "agent": "video_editor"}
