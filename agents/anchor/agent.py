@@ -78,6 +78,21 @@ class Agent(BaseAgent):
         # Strip any remaining [...] content — catches pronunciation guides like [shee jeen-PEENG],
         # [GRAPHIC:] or [PAUSE] the LLM missed. HeyGen TTS reads brackets literally.
         text = re.sub(r'\[[^\]]*\]', '', text)
+        # Remove duplicate newsroom datelines — keep the first and the sign-off (after "I'm").
+        # Multi-story scripts can end up with the station name opening each story segment.
+        if settings.NEWSROOM_NAME:
+            _pat = re.escape(settings.NEWSROOM_NAME)
+            _first = [False]
+            _snap = text
+            def _dedup(m):
+                preceding = _snap[:m.start()].strip()[-40:]
+                if re.search(r"I'?m\b", preceding, re.IGNORECASE):
+                    return m.group(0)  # sign-off — keep
+                if not _first[0]:
+                    _first[0] = True
+                    return m.group(0)  # first dateline — keep
+                return ''  # duplicate dateline — strip
+            text = re.sub(_pat, _dedup, text, flags=re.IGNORECASE)
         for i, marker in enumerate(broll_markers):
             text = text.replace(f"\x00BROLL{i}\x00", marker)
         return text
