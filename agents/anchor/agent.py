@@ -13,7 +13,8 @@ import requests
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from agents.registry import BaseAgent, AgentInfo
-from tools.heygen_tool import get_heygen_credits, generate_video_multiscene, delete_heygen_asset
+from tools.heygen_tool import get_heygen_credits, generate_video_multiscene, delete_heygen_asset, prepare_enhanced_background
+from config.overlays import get_background_layers
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,9 @@ class Agent(BaseAgent):
             return f"\x00BROLL{len(broll_markers)-1}\x00"
         text = re.sub(r'\[BROLL:[^\]]*\]', _stash_broll, text, flags=re.IGNORECASE)
         text = re.sub(r'\*+|_+|`+|#{1,6}\s*', '', text)
+        # Strip any remaining [...] content — catches pronunciation guides like [shee jeen-PEENG],
+        # [GRAPHIC:] or [PAUSE] the LLM missed. HeyGen TTS reads brackets literally.
+        text = re.sub(r'\[[^\]]*\]', '', text)
         for i, marker in enumerate(broll_markers):
             text = text.replace(f"\x00BROLL{i}\x00", marker)
         return text
@@ -283,18 +287,20 @@ class Agent(BaseAgent):
 
     # ── HeyGen param extraction ──────────────────────────────────────────────
 
-    def _extract_heygen_params(self, message: str) -> tuple[str, str, str, str, str, str]:
+    def _extract_heygen_params(self, message: str) -> tuple[str, str, str, str, str, str, str, str]:
         """Parse HeyGen params injected by the executive producer."""
         def find(pattern):
             m = re.search(pattern, message, re.IGNORECASE)
             return m.group(1).strip() if m else ""
 
-        avatar_id     = find(r'AVATAR ID[:\s]+([^\n]+)')
-        voice_id      = find(r'VOICE ID[:\s]+([^\n]+)')
-        bg_id         = find(r'BACKGROUND ASSET ID[:\s]+([^\n]+)')
-        voice_emotion = find(r'VOICE EMOTION[:\s]+([^\n]+)')
-        talking_style = find(r'TALKING STYLE[:\s]+([^\n]+)')
-        expression    = find(r'EXPRESSION[:\s]+([^\n]+)')
+        avatar_id     = find(r'AVATAR ID[ \t]*:[ \t]*([^\n]+)')
+        voice_id      = find(r'VOICE ID[ \t]*:[ \t]*([^\n]+)')
+        bg_id         = find(r'BACKGROUND ASSET ID[ \t]*:[ \t]*([^\n]+)')
+        voice_emotion = find(r'VOICE EMOTION[ \t]*:[ \t]*([^\n]+)')
+        talking_style = find(r'TALKING STYLE[ \t]*:[ \t]*([^\n]+)')
+        expression    = find(r'EXPRESSION[ \t]*:[ \t]*([^\n]+)')
+        pip_position  = find(r'PIP POSITION[ \t]*:[ \t]*([^\n]+)') or "left"
+        desk_slug     = find(r'DESK_SLUG[ \t]*:[ \t]*([^\n]+)')
 
         return (
             avatar_id     or settings.HEYGEN_AVATAR_ID,
@@ -303,6 +309,8 @@ class Agent(BaseAgent):
             voice_emotion,
             talking_style,
             expression,
+            pip_position,
+            desk_slug,
         )
 
     # ── HeyGen polling ───────────────────────────────────────────────────────
@@ -382,7 +390,16 @@ class Agent(BaseAgent):
                 logger.warning(f"[anchor] Could not verify HeyGen credits: {credit_err}")
 
             # Step 1: Extract HeyGen params from the message
-            avatar_id, voice_id, bg_id, voice_emotion, talking_style, expression = self._extract_heygen_params(message)
+            avatar_id, voice_id, bg_id, voice_emotion, talking_style, expression, pip_position, desk_slug = self._extract_heygen_params(message)
+
+            # Step 1b: Apply background layers to the studio background
+            bg_layers = get_background_layers(desk_slug)
+            enhanced_bg_id, enhanced_bg_bytes, enhanced_bg_fresh, enhanced_bg_cache = await asyncio.to_thread(
+                prepare_enhanced_background, bg_id, bg_layers
+            )
+            if enhanced_bg_id != bg_id:
+                logger.info(f"[anchor] Enhanced background ready: {enhanced_bg_id}")
+            bg_id = enhanced_bg_id  # use for all scenes going forward
 
             # Step 2: Extract the broadcast script from EP context, then clean it.
             # Prefer the inline === SCRIPT === block the script_writer appends; fall back to
@@ -418,13 +435,14 @@ class Agent(BaseAgent):
                 segments = await self._resolve_broll_media(segments)
 
             # Step 5: Submit to HeyGen
-            title = re.search(r'TOPIC[:\s]+([^\n]+)', message, re.IGNORECASE)
+            title = re.search(r'TOPIC[ \t]*:[ \t]*([^\n]+)', message, re.IGNORECASE)
             title = title.group(1).strip() if title else "News Segment"
 
             submit_result = await asyncio.to_thread(
                 generate_video_multiscene,
                 segments, avatar_id, voice_id, bg_id, title,
-                voice_emotion, talking_style, expression,
+                voice_emotion, talking_style, expression, pip_position,
+                enhanced_bg_bytes,
             )
 
             if not submit_result.get("video_id"):
@@ -461,7 +479,11 @@ class Agent(BaseAgent):
                 }
 
             # Step 7: Clean up temporary composite assets from HeyGen
-            uploaded_composites = submit_result.get("uploaded_composites", [])
+            uploaded_composites = list(submit_result.get("uploaded_composites", []))
+            if enhanced_bg_fresh and enhanced_bg_cache:
+                # Asset cache is cleared so next render re-uploads; bytes cache is kept
+                # so FFmpeg compositing only runs once.
+                uploaded_composites.append({"asset_id": enhanced_bg_id, "cache_path": enhanced_bg_cache})
             if uploaded_composites:
                 logger.info(f"[anchor] Cleaning up {len(uploaded_composites)} uploaded composite asset(s)...")
                 for entry in uploaded_composites:

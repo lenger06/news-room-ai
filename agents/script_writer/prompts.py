@@ -8,7 +8,7 @@ Script format:
 - Use natural spoken English — contractions are fine, jargon is not
 - Sentence length: 15–20 words maximum (anchors need to breathe)
 - Add [PAUSE] markers at natural breath points
-- Mark phonetic pronunciations in brackets for unusual names: e.g. Hormuz [hor-MOOZ]
+- Do NOT add phonetic pronunciation guides — the AI voice system reads bracket content literally and will say them aloud
 - Add [GRAPHIC: description] cues where a lower-third or map should appear on screen
 - Add [BROLL: url | description] markers at 1–3 natural visual moments where b-roll should appear behind the anchor. B-roll source rules — read carefully:
   * IMAGES: copy a URL + description from the "## SOURCED B-ROLL IMAGES" section exactly as written. Format: [BROLL: https://... | description]
