@@ -40,6 +40,7 @@ class ProductionState(TypedDict):
     desk_name: str
     desk_prompt_style: str
     desk_background_asset_id: str
+    desk_pip_position: str
 
     # Selected anchor for this production
     anchor_name: str
@@ -71,9 +72,9 @@ class Agent(BaseAgent):
 
     WORKFLOW_STEPS = {
         "RESEARCH_ONLY":    ["researcher"],
-        "ARTICLE":          ["researcher", "writer", "fact_checker", "producer"],
-        "FULL_PRODUCTION":  ["researcher", "writer", "fact_checker", "script_writer", "producer"],
-        "BROADCAST_VIDEO":  ["researcher", "writer", "fact_checker", "script_writer", "anchor", "video_editor", "producer", "publisher"],
+        "ARTICLE":          ["researcher", "writer", "fact_checker", "editor", "producer"],
+        "FULL_PRODUCTION":  ["researcher", "writer", "fact_checker", "editor", "script_writer", "producer"],
+        "BROADCAST_VIDEO":  ["researcher", "writer", "fact_checker", "editor", "script_writer", "anchor", "video_editor", "producer", "publisher"],
         "SCRIPT_ONLY":      ["script_writer", "producer"],
         "VIDEO_FROM_SCRIPT":["anchor", "video_editor", "producer", "publisher"],
     }
@@ -153,6 +154,7 @@ class Agent(BaseAgent):
                 state["desk_name"] = desk.name if desk else "National Desk"
                 state["desk_prompt_style"] = desk.prompt_style if desk else ""
                 state["desk_background_asset_id"] = desk.background_asset_id if desk else "f6fa4085043140deaba8258a96233036"
+                state["desk_pip_position"] = desk.pip_position if desk else "left"
 
                 # Select anchor: explicit name > desk preferred > random
                 anchor = get_anchor(
@@ -184,6 +186,7 @@ class Agent(BaseAgent):
                 state["desk_name"] = "National Desk"
                 state["desk_prompt_style"] = ""
                 state["desk_background_asset_id"] = "f6fa4085043140deaba8258a96233036"
+                state["desk_pip_position"] = "left"
                 anchor = get_anchor()
                 state["anchor_name"] = anchor.name
                 state["anchor_avatar_id"] = anchor.default_avatar_id
@@ -204,6 +207,7 @@ class Agent(BaseAgent):
             state["desk_name"] = "National Desk"
             state["desk_prompt_style"] = ""
             state["desk_background_asset_id"] = "f6fa4085043140deaba8258a96233036"
+            state["desk_pip_position"] = "left"
             anchor = get_anchor()
             state["anchor_name"] = anchor.name
             state["anchor_avatar_id"] = anchor.default_avatar_id
@@ -277,6 +281,7 @@ class Agent(BaseAgent):
                     )
             elif agent_name == "anchor" and anchor_avatar_id:
                 background_asset_id = state.get("desk_background_asset_id", "")
+                pip_position = state.get("desk_pip_position", "left")
                 step_input += (
                     f"\n\nANCHOR NAME: {anchor_name}\n"
                     f"AVATAR ID: {anchor_avatar_id}\n"
@@ -285,8 +290,12 @@ class Agent(BaseAgent):
                     f"TALKING STYLE: {state.get('anchor_talking_style', '')}\n"
                     f"EXPRESSION: {state.get('anchor_expression', '')}\n"
                     f"BACKGROUND ASSET ID: {background_asset_id}\n"
+                    f"PIP POSITION: {pip_position}\n"
+                    f"DESK_SLUG: {state.get('desk', '')}\n"
                     f"TOPIC: {state.get('topic', '')}\n"
                 )
+            elif agent_name == "video_editor":
+                step_input += f"\n\nDESK_SLUG: {state.get('desk', '')}\n"
             elif agent_name == "publisher":
                 import json as _json
                 auto_ids = resolve_playlist_ids(
@@ -433,6 +442,7 @@ class Agent(BaseAgent):
                 "desk_name": "",
                 "desk_prompt_style": "",
                 "desk_background_asset_id": "",
+                "desk_pip_position": "left",
                 "anchor_name": "",
                 "anchor_avatar_id": "",
                 "anchor_voice_id": "",

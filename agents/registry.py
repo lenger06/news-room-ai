@@ -40,7 +40,7 @@ class AgentRegistry:
             version="1.0.0",
             module_path="agents.executive_producer.agent",
             parent_agent=None,
-            manages_agents=["researcher", "writer", "fact_checker", "script_writer", "anchor", "video_editor", "producer", "publisher"],
+            manages_agents=["researcher", "writer", "fact_checker", "editor", "script_writer", "anchor", "video_editor", "producer", "publisher"],
         ))
         self.register_agent(AgentInfo(
             name="researcher",
@@ -64,6 +64,14 @@ class AgentRegistry:
             description="Verifies factual claims in draft articles before script production",
             version="1.0.0",
             module_path="agents.fact_checker.agent",
+            parent_agent="executive_producer",
+        ))
+        self.register_agent(AgentInfo(
+            name="editor",
+            display_name="Editor",
+            description="Applies fact-check corrections and verifies current titles/status before script production",
+            version="1.0.0",
+            module_path="agents.editor.agent",
             parent_agent="executive_producer",
         ))
         self.register_agent(AgentInfo(

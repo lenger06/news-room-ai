@@ -89,15 +89,16 @@ Gathers source material using real-time web search (Tavily). Searches for multip
 Receives the research brief and writes a polished news article in broadcast style — inverted pyramid structure, active voice, short sentences, 400–600 words. Includes a branded dateline (e.g. "WASHINGTON — Defy Logic News"). Saves to `./output/articles/`.
 
 ### Fact Checker
-Reads the draft article and verifies key factual claims using web search. Produces a Fact Check Report with three sections — **Verified**, **Unverified**, and **Corrections Needed** — and issues one of three verdicts:
+Reads the draft article and verifies key factual claims using web search. Priority check: confirms the current title and status of every named political figure, head of state, and official — "former" applied to a sitting official is a broadcast-level error. Produces a Fact Check Report with three sections — **Verified**, **Unverified**, and **Corrections Needed** — and issues one of three verdicts:
 - `CLEAR TO PUBLISH` — all significant claims verified
 - `PUBLISH WITH NOTES` — minor unverified items, no outright errors
 - `HOLD FOR CORRECTIONS` — factual errors found, must be fixed before publishing
 
-The full report and verdict are passed to all downstream agents as context.
+### Editor
+Receives the draft article and the Fact Check Report. Applies every correction listed under Corrections Needed — uses web search to confirm accurate information before making each change. Particular focus on current vs. former titles for political figures and officials. Outputs the complete corrected article plus an editorial note listing every change made. The Script Writer uses this corrected article, not the original draft.
 
 ### Script Writer
-Converts the verified article into a spoken broadcast anchor script. Formats it for on-air delivery: natural spoken English, breath-pause markers, phonetic pronunciations for difficult names, and `[GRAPHIC: ...]` cues for supporting visuals. Places `[BROLL: url | description]` markers for still images and `[BROLL: url | description | video]` markers for video clips at the start of each topic — B-roll switches the instant the marker is reached. Uses the selected anchor's name in the sign-off (e.g. "I'm Alex Morgan, Defy Logic News."). Target read time: 60–90 seconds. Saves to `./output/scripts/`.
+Converts the editor-reviewed article into a spoken broadcast anchor script. Formats it for on-air delivery: natural spoken English, breath-pause markers, and `[GRAPHIC: ...]` cues for supporting visuals. Places `[BROLL: url | description]` markers for still images and `[BROLL: url | description | video]` markers for video clips at the start of each topic — B-roll switches the instant the marker is reached. Uses the selected anchor's name in the sign-off (e.g. "I'm Alex Morgan, Defy Logic News."). Target read time: 60–90 seconds. Saves to `./output/scripts/`.
 
 ### Anchor
 Takes the broadcast script, cleans it for spoken delivery, and submits it to HeyGen using the selected anchor's avatar and voice IDs. For scenes with `[BROLL:]` markers, b-roll media (still images **or** video clips) is composited as a Picture-in-Picture in the upper-left corner of the studio background video using FFmpeg, uploaded as a new HeyGen video asset, and used as the scene background. The PIP preserves the original aspect ratio of the source media. Video clip b-roll loops seamlessly for the duration of the scene. Falls back to a Pillow static image composite if FFmpeg is unavailable (images only). Polls for completion natively in Python (every 30 seconds, up to 10 minutes) — does not rely on the LLM to manage polling. Returns the video URL and thumbnail URL when complete.
@@ -139,9 +140,9 @@ Get IDs by calling with your HeyGen API key:
 | Workflow | Trigger phrases | Steps |
 |----------|----------------|-------|
 | `RESEARCH_ONLY` | "research", "find information about", "what do we know about" | Researcher |
-| `ARTICLE` | "write an article", "write a story", "cover this story" | Researcher → Writer → Fact Checker → Producer |
-| `FULL_PRODUCTION` | "full production", "produce a segment", "news segment", "broadcast" | Researcher → Writer → Fact Checker → Script Writer → Producer |
-| `BROADCAST_VIDEO` | "video", "youtube", "record", "generate video", "publish" | Researcher → Writer → Fact Checker → Script Writer → Anchor → Video Editor → Producer → Publisher |
+| `ARTICLE` | "write an article", "write a story", "cover this story" | Researcher → Writer → Fact Checker → Editor → Producer |
+| `FULL_PRODUCTION` | "full production", "produce a segment", "news segment", "broadcast" | Researcher → Writer → Fact Checker → Editor → Script Writer → Producer |
+| `BROADCAST_VIDEO` | "video", "youtube", "record", "generate video", "publish" | Researcher → Writer → Fact Checker → Editor → Script Writer → Anchor → Video Editor → Producer → Publisher |
 | `SCRIPT_ONLY` | "script only", "write a script", "turn this into a script" (with content) | Script Writer → Producer |
 | `VIDEO_FROM_SCRIPT` | "video from script", "record this script", "generate video from script" | Anchor → Video Editor → Producer → Publisher |
 
@@ -158,6 +159,7 @@ Jarvis (or any HTTP client)
              ├─► Researcher      — web_research_tool, file_operations_tool
              ├─► Writer          — file_operations_tool
              ├─► Fact Checker    — web_research_tool
+             ├─► Editor          — web_research_tool, file_operations_tool (applies corrections)
              ├─► Script Writer   — file_operations_tool
              ├─► Anchor          — HeyGen API (generate + native async poll)
              ├─► Video Editor    — video_tools (download, extract cues, package)
