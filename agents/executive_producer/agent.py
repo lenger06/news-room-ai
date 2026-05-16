@@ -242,12 +242,16 @@ class Agent(BaseAgent):
             anchor_avatar_id = state.get("anchor_avatar_id", "")
             anchor_voice_id = state.get("anchor_voice_id", "")
 
+            from datetime import date as _date
+            today_str = _date.today().strftime("%B %d, %Y")
+
             if prior_outputs:
                 context_block = "\n\n".join(
                     f"=== {name.upper()} OUTPUT ===\n{text}"
                     for name, text in prior_outputs.items()
                 )
                 step_input = (
+                    f"TODAY'S DATE: {today_str}\n\n"
                     f"TOPIC: {state['topic']}\n\n"
                     f"ORIGINAL REQUEST: {state['request']}\n\n"
                     f"{context_block}\n\n"
@@ -255,6 +259,7 @@ class Agent(BaseAgent):
                 )
             else:
                 step_input = (
+                    f"TODAY'S DATE: {today_str}\n\n"
                     f"TOPIC: {state['topic']}\n\n"
                     f"REQUEST: {state['request']}\n\n"
                     f"Begin your work."

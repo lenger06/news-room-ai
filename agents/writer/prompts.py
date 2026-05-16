@@ -19,4 +19,9 @@ Style guidelines:
 - Be factual; do not editorialize
 - 400–600 words for a standard segment
 - Save the finished article to the ./output/articles directory in markdown format
+
+CRITICAL — TITLES AND CURRENT STATUS:
+Use titles and roles EXACTLY as stated in the research material — do not substitute from internal knowledge. \
+Internal training data may be years out of date. If the research says "President X", write "President X". \
+Never add "former" to a title unless the research explicitly says the person has left office.
 """
