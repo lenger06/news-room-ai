@@ -7,6 +7,7 @@ if str(project_root) not in sys.path:
 
 import re
 import logging
+import requests
 from datetime import date
 from langchain.agents import create_openai_functions_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -19,17 +20,62 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# Titles that commonly appear with "former" incorrectly
-_TITLE_PATTERN = re.compile(
+# Matches "former [optional country adjective] [title] [Name]"
+_FORMER_RE = re.compile(
     r'former\s+'
-    r'(?:(?:U\.S\.?|United\s+States|British|French|German|Russian|Chinese|Canadian|Australian|Japanese|Israeli|Iranian|Saudi)\s+)?'
-    r'(?:President|Prime\s+Minister|Vice\s+President|Secretary(?:\s+of\s+State)?|'
+    r'(?:(?:U\.S\.?|United\s+States|British|French|German|Russian|Chinese|'
+    r'Canadian|Australian|Japanese|Israeli|Iranian|Saudi|South\s+Korean|'
+    r'Indian|Brazilian|Mexican|Italian|Spanish)\s+)?'
+    r'(?:President|Prime\s+Minister|Vice[\s-]President|Secretary(?:\s+of\s+State)?|'
     r'Secretary[-\s]General|Director(?:\s+General)?|Chancellor|Minister|Senator|'
     r'Governor|Speaker|CEO|Chairman|Chair(?:woman|man|person)?|Ambassador|'
     r'General|Admiral|Commissioner)'
     r'(?:\s+[A-Z][a-zA-Z\'-]+){1,4}',
     re.IGNORECASE,
 )
+
+# Extracts just the name portion from a "former ... [Name]" string
+_NAME_RE = re.compile(
+    r'former\s+(?:(?:U\.S\.?|United\s+States|British|French|German|Russian|Chinese|'
+    r'Canadian|Australian|Japanese|Israeli|Iranian|Saudi|South\s+Korean|'
+    r'Indian|Brazilian|Mexican|Italian|Spanish)\s+)?'
+    r'(?:President|Prime\s+Minister|Vice[\s-]President|Secretary(?:\s+of\s+State)?|'
+    r'Secretary[-\s]General|Director(?:\s+General)?|Chancellor|Minister|Senator|'
+    r'Governor|Speaker|CEO|Chairman|Chair(?:woman|man|person)?|Ambassador|'
+    r'General|Admiral|Commissioner)\s+',
+    re.IGNORECASE,
+)
+
+
+def _tavily_search(query: str) -> str:
+    """Direct Tavily search — called deterministically in Python, not via LLM tool."""
+    if not settings.TAVILY_API_KEY:
+        return "TAVILY_API_KEY not configured — cannot verify"
+    try:
+        resp = requests.post(
+            "https://api.tavily.com/search",
+            json={
+                "api_key": settings.TAVILY_API_KEY,
+                "query": query,
+                "search_depth": "basic",
+                "include_answer": True,
+                "max_results": 3,
+                "topic": "news",
+            },
+            timeout=15,
+        )
+        if not resp.ok:
+            return f"Search failed: HTTP {resp.status_code}"
+        data = resp.json()
+        lines = []
+        if data.get("answer"):
+            lines.append(f"Summary: {data['answer']}")
+        for r in data.get("results", [])[:3]:
+            snippet = r.get("content", "")[:250].replace("\n", " ")
+            lines.append(f"• {r.get('title', '')}: {snippet}")
+        return "\n".join(lines) if lines else "No results returned"
+    except Exception as e:
+        return f"Search error: {e}"
 
 
 def _extract_article_text(message: str) -> str:
@@ -44,13 +90,8 @@ def _extract_article_text(message: str) -> str:
     return message
 
 
-def _find_former_references(text: str) -> list[str]:
-    """Return deduplicated list of 'former [title] [Name]' strings found in text."""
-    return list(dict.fromkeys(m.group(0) for m in _TITLE_PATTERN.finditer(text)))
-
-
 class Agent(BaseAgent):
-    """Editor — applies fact-check corrections and verifies current titles before script production."""
+    """Editor — verifies titles via Tavily, applies fact-check corrections, produces clean article."""
 
     def __init__(self):
         self.llm = ChatOpenAI(model="gpt-4o", temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
@@ -69,8 +110,8 @@ class Agent(BaseAgent):
         return AgentInfo(
             name="editor",
             display_name="Editor",
-            description="Applies fact-check corrections and verifies current titles/status before script production",
-            version="1.0.0",
+            description="Verifies titles via Tavily, applies fact-check corrections before script production",
+            version="2.0.0",
             module_path="agents.editor.agent",
             parent_agent="executive_producer",
         )
@@ -78,29 +119,44 @@ class Agent(BaseAgent):
     async def process_message(self, message: str, context: dict = None) -> dict:
         try:
             today = date.today().strftime("%B %d, %Y")
+            year = date.today().year
 
-            # Deterministic scan: find every "former [title] [Name]" in the article
+            # ── Step 1: Find every "former [title] [Name]" in the article ──
             article_text = _extract_article_text(message)
-            former_refs = _find_former_references(article_text)
+            former_matches = list(dict.fromkeys(
+                m.group(0) for m in _FORMER_RE.finditer(article_text)
+            ))
 
-            if former_refs:
-                ref_list = "\n".join(f"  • {r}" for r in former_refs)
-                preamble = (
-                    f"TODAY'S DATE: {today}\n\n"
-                    f"🚨 MANDATORY FIRST TASK — DO NOT SKIP:\n"
-                    f"The following 'former [title]' phrases were found in the article. "
-                    f"Each one MUST be verified with web_research_tool before you do anything else. "
-                    f"Search for \"[person name] current title {date.today().year}\" for each. "
-                    f"If the person currently holds that office, remove 'former' and use their correct current title — "
-                    f"this is a critical on-air error.\n\n"
-                    f"VERIFY EACH OF THESE:\n{ref_list}\n\n"
-                    f"Only after completing these verifications should you address other corrections.\n\n"
+            preamble_lines = [f"TODAY'S DATE: {today}\n"]
+
+            if former_matches:
+                logger.info(f"[Editor] {len(former_matches)} 'former' reference(s) found — running Tavily verification")
+                preamble_lines.append(
+                    "🚨 TAVILY-VERIFIED TITLE CHECK — READ THIS FIRST:\n"
+                    "The following 'former [title]' phrases appear in the article. "
+                    "A Tavily search was run for each one right now. "
+                    "The results are below. If a person is currently in office, "
+                    "their 'former' label is WRONG and must be corrected.\n"
                 )
-                logger.info(f"[Editor] Flagged {len(former_refs)} 'former' reference(s) for mandatory verification: {former_refs}")
-            else:
-                preamble = f"TODAY'S DATE: {today}\n\n"
+                for ref in former_matches:
+                    # Extract name by stripping the "former [title]" prefix
+                    name = _NAME_RE.sub("", ref).strip()
+                    query = f"{name} current title position role {year}"
+                    logger.info(f"[Editor] Tavily search: {query!r}")
+                    result = _tavily_search(query)
+                    preamble_lines.append(f"PHRASE: \"{ref}\"")
+                    preamble_lines.append(f"SEARCH QUERY: {query}")
+                    preamble_lines.append(f"TAVILY RESULT:\n{result}")
+                    preamble_lines.append("")
 
-            augmented_input = preamble + message
+                preamble_lines.append(
+                    "Based on the Tavily results above, correct any 'former' labels "
+                    "that are wrong. Then proceed with other fact-check corrections below.\n"
+                )
+            else:
+                preamble_lines.append("No 'former [title]' references detected in the article.\n")
+
+            augmented_input = "\n".join(preamble_lines) + "\n" + message
             result = self.executor.invoke({"input": augmented_input, "chat_history": []})
             return {"success": True, "response": result.get("output", ""), "agent": "editor"}
 
