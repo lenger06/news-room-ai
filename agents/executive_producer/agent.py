@@ -22,7 +22,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from agents.registry import BaseAgent, AgentInfo, agent_registry
 from agents.executive_producer.prompts import EP_SYSTEM_PROMPT, EP_ANALYSIS_PROMPT
 from config.settings import settings
-from config.anchors import get_anchor, list_anchors, list_anchors_for_prompt
+from config.anchors import get_anchor, list_anchors
 from config.desks import get_desk, list_desks
 from config.playlists import resolve_playlist_ids, get_ids_by_keys
 
@@ -53,6 +53,15 @@ class ProductionState(TypedDict):
     # Target video duration (seconds); None = let script_writer use its default
     target_duration_seconds: Optional[int]
 
+    # Active broadcast (set from show schedule or passed in context["show_slug"])
+    show_slug: str
+    show_name: str
+    show_tone: str
+
+    # Per-run output directory: ./output/{show_slug}/{run_id}
+    output_dir: str
+    run_id: str
+
     # YouTube playlists
     playlist_ids: List[str]         # fully resolved IDs (automatic + EP picks)
     extra_playlist_keys: List[str]  # EP-selected keys from the playlists menu
@@ -63,6 +72,7 @@ class ProductionState(TypedDict):
     # Current step tracking
     current_step_index: int
     anchor_failed: bool
+    researcher_failed: bool
     error: Optional[str]
     final_summary: str
 
@@ -77,6 +87,7 @@ class Agent(BaseAgent):
         "BROADCAST_VIDEO":  ["researcher", "writer", "fact_checker", "editor", "script_writer", "anchor", "video_editor", "producer", "publisher"],
         "SCRIPT_ONLY":      ["script_writer", "producer"],
         "VIDEO_FROM_SCRIPT":["anchor", "video_editor", "producer", "publisher"],
+        "SPECIAL_REPORT":   ["researcher", "writer", "fact_checker", "editor", "script_writer", "anchor", "video_editor", "producer", "publisher"],
     }
 
     def __init__(self):
@@ -120,10 +131,27 @@ class Agent(BaseAgent):
         return graph.compile()
 
     async def _analyse_node(self, state: ProductionState) -> ProductionState:
-        """Use LLM to determine workflow, desk, topic, and anchor selection."""
+        """Detect the active show, use LLM for workflow/desk/topic, select anchor deterministically."""
+        from config.shows import detect_show, get_show
+        from tools.anchor_rotation import get_next_look, get_show_anchor_name
+
+        # Show detection is deterministic — no API call needed
+        show_slug = state.get("show_slug", "")
+        show = get_show(show_slug) if show_slug else detect_show()
+        state["show_slug"] = show.slug
+        state["show_name"] = show.name
+        state["show_tone"] = show.tone
+
+        from datetime import datetime as _dt
+        _run_id = _dt.now().strftime("%Y%m%d_%H%M%S")
+        _output_dir = f"./output/{show.slug}/{_run_id}"
+        for _sub in ("articles", "scripts", "media", "production_logs"):
+            (Path(_output_dir) / _sub).mkdir(parents=True, exist_ok=True)
+        state["run_id"] = _run_id
+        state["output_dir"] = _output_dir
+
         try:
             from config.playlists import list_choosable_for_prompt
-            anchor_list = list_anchors_for_prompt()
             desk_list = "\n".join(
                 f"  {d['slug']:15} {d['name']} — {d['beat']}"
                 for d in list_desks()
@@ -132,9 +160,9 @@ class Agent(BaseAgent):
                 SystemMessage(content=EP_SYSTEM_PROMPT),
                 HumanMessage(content=EP_ANALYSIS_PROMPT.format(
                     request=state["request"],
-                    anchor_list=anchor_list,
                     desk_list=desk_list,
                     playlist_list=list_choosable_for_prompt(),
+                    show_context=show.for_prompt(),
                 )),
             ])
             content = response.content
@@ -156,13 +184,18 @@ class Agent(BaseAgent):
                 state["desk_background_asset_id"] = desk.background_asset_id if desk else "f6fa4085043140deaba8258a96233036"
                 state["desk_pip_position"] = desk.pip_position if desk else "left"
 
-                # Select anchor: explicit name > desk preferred > random
-                anchor = get_anchor(
-                    name=parsed.get("anchor_name"),
-                    desk=state["desk"] if not parsed.get("anchor_name") else None,
-                )
+                # Select anchor deterministically from show schedule (with stand-in rotation)
+                assignment = show.anchor_for_desk(state["desk"])
+                if assignment:
+                    anchor_name = get_show_anchor_name(show.slug, assignment)
+                    anchor = get_anchor(name=anchor_name)
+                    avatar_id = get_next_look(anchor, assignment.look_preference, state["desk"])
+                else:
+                    anchor = get_anchor(desk=state["desk"])
+                    avatar_id = get_next_look(anchor, desk=state["desk"])
+
                 state["anchor_name"] = anchor.name
-                state["anchor_avatar_id"] = anchor.get_avatar_id(parsed.get("avatar_look"))
+                state["anchor_avatar_id"] = avatar_id
                 state["anchor_voice_id"] = anchor.voice_id
                 state["anchor_voice_emotion"] = anchor.voice_emotion or ""
                 state["anchor_talking_style"] = anchor.talking_style or ""
@@ -172,10 +205,19 @@ class Agent(BaseAgent):
                     state["desk"], anchor.name, workflow, state["topic"]
                 )
                 raw_dur = parsed.get("target_duration_seconds")
-                state["target_duration_seconds"] = int(raw_dur) if raw_dur else None
+                if raw_dur:
+                    state["target_duration_seconds"] = int(raw_dur)
+                elif workflow == "SPECIAL_REPORT":
+                    state["target_duration_seconds"] = 600   # default 10 min for special reports
+                else:
+                    state["target_duration_seconds"] = None
+
+                # Show-level background overrides desk background (e.g. special-report has its own look)
+                if show.background_asset_id:
+                    state["desk_background_asset_id"] = show.background_asset_id
                 logger.info(
-                    f"[EP] Workflow: {workflow} | Desk: {state['desk_name']} | "
-                    f"Anchor: {anchor.name} | Look: {parsed.get('avatar_look', 'default')} | "
+                    f"[EP] Show: {show.name} | Workflow: {workflow} | Desk: {state['desk_name']} | "
+                    f"Anchor: {anchor.name} | Avatar: {avatar_id[:24]}… | "
                     f"Duration: {state['target_duration_seconds']}s | Topic: {state['topic']}"
                 )
             else:
@@ -185,11 +227,18 @@ class Agent(BaseAgent):
                 state["desk"] = "national"
                 state["desk_name"] = "National Desk"
                 state["desk_prompt_style"] = ""
-                state["desk_background_asset_id"] = "f6fa4085043140deaba8258a96233036"
+                state["desk_background_asset_id"] = show.background_asset_id or "f6fa4085043140deaba8258a96233036"
                 state["desk_pip_position"] = "left"
-                anchor = get_anchor()
+                assignment = show.anchor_for_desk("national")
+                if assignment:
+                    anchor_name = get_show_anchor_name(show.slug, assignment)
+                    anchor = get_anchor(name=anchor_name)
+                    avatar_id = get_next_look(anchor, assignment.look_preference, "national")
+                else:
+                    anchor = get_anchor()
+                    avatar_id = anchor.default_avatar_id
                 state["anchor_name"] = anchor.name
-                state["anchor_avatar_id"] = anchor.default_avatar_id
+                state["anchor_avatar_id"] = avatar_id
                 state["anchor_voice_id"] = anchor.voice_id
                 state["anchor_voice_emotion"] = anchor.voice_emotion or ""
                 state["anchor_talking_style"] = anchor.talking_style or ""
@@ -229,6 +278,7 @@ class Agent(BaseAgent):
             return state
 
         agent_name = steps[idx]
+        output_dir = state.get("output_dir", "")
         logger.info(f"[EP] Executing step {idx + 1}/{len(steps)}: {agent_name}")
 
         try:
@@ -265,13 +315,57 @@ class Agent(BaseAgent):
                     f"Begin your work."
                 )
 
+            is_special_report = state.get("workflow") == "SPECIAL_REPORT"
+
+            if output_dir and agent_name in ("writer", "fact_checker", "editor"):
+                step_input += f"\n\nSAVE_DIR: {output_dir}/articles"
+
+            if agent_name == "researcher" and is_special_report:
+                step_input += (
+                    "\n\nSPECIAL REPORT MODE — deep multi-angle research required. "
+                    "Run at least 8–10 searches covering: (1) latest developments, "
+                    "(2) historical background and timeline, (3) key figures and their positions, "
+                    "(4) expert analysis and commentary, (5) opposing viewpoints and criticism, "
+                    "(6) economic or social impact, (7) international or comparative context, "
+                    "(8) what happens next / what to watch. "
+                    "Your brief must be comprehensive enough to support a 10+ minute broadcast."
+                )
+
+            if agent_name == "writer":
+                target_dur = state.get("target_duration_seconds")
+                if target_dur:
+                    target_words = round(target_dur * 150 / 60)
+                    step_input += (
+                        f"\n\nTARGET WORD COUNT: approximately {target_words} words "
+                        f"(needed to support a {target_dur}-second broadcast). "
+                        f"This overrides the default 400–600 word target."
+                    )
+                if is_special_report:
+                    step_input += (
+                        "\n\nSPECIAL REPORT FORMAT — this is a long-form analytical piece, "
+                        "not a standard news article. Structure it as: "
+                        "(1) Executive Summary, (2) Background & Context, "
+                        "(3) Key Developments, (4) Multiple Perspectives & Expert Analysis, "
+                        "(5) Implications & What's Next, (6) Conclusion. "
+                        "Write in depth — every section must be substantive, multiple paragraphs. "
+                        "IMPORTANT: specific facts (names, dates, statistics, direct quotes) must "
+                        "come from the research brief. However, you MAY and SHOULD add explanatory "
+                        "context, analytical commentary, historical parallels, and elaboration that "
+                        "helps a general audience understand why these facts matter. "
+                        "Do not pad with repetition — expand with genuine analysis."
+                    )
+
             # Inject desk + anchor context for script_writer and anchor steps
             if agent_name == "script_writer" and anchor_name:
                 desk_name = state.get("desk_name", "")
                 desk_style = state.get("desk_prompt_style", "")
                 target_dur = state.get("target_duration_seconds")
+                show_name = state.get("show_name", "")
+                show_tone = state.get("show_tone", "")
                 step_input += (
-                    f"\n\nDESK: {desk_name}\n"
+                    f"\n\nSHOW: {show_name}\n"
+                    f"SHOW TONE: {show_tone}\n"
+                    f"DESK: {desk_name}\n"
                     f"DESK STYLE: {desk_style}\n"
                     f"ANCHOR: {anchor_name}\n"
                     f"Write the script for {anchor_name} to read. "
@@ -284,6 +378,20 @@ class Agent(BaseAgent):
                         f"(approximately {target_words} words). "
                         f"This overrides the default read-time target."
                     )
+                if is_special_report:
+                    step_input += (
+                        "\nSPECIAL REPORT SCRIPT — do NOT include any markdown headings, bold labels, "
+                        "or chapter titles (no **Introduction**, no # Section, nothing like that). "
+                        "The anchor reads everything aloud — section titles become spoken words the "
+                        "audience hears, which sounds wrong. Use natural spoken transitions between "
+                        "topics instead: 'To understand how we got here...', 'Now, looking at the "
+                        "broader picture...', 'What does this mean going forward?'. "
+                        "Each major topic shift should get its own [BROLL:] marker. "
+                        "Open with a compelling hook and close with a strong forward-looking sign-off. "
+                        "Do not rush — write the full target word count."
+                    )
+                if output_dir:
+                    step_input += f"\nSAVE_DIR: {output_dir}/scripts"
             elif agent_name == "anchor" and anchor_avatar_id:
                 background_asset_id = state.get("desk_background_asset_id", "")
                 pip_position = state.get("desk_pip_position", "left")
@@ -301,6 +409,8 @@ class Agent(BaseAgent):
                 )
             elif agent_name == "video_editor":
                 step_input += f"\n\nDESK_SLUG: {state.get('desk', '')}\n"
+                if output_dir:
+                    step_input += f"MEDIA_DIR: {output_dir}/media\n"
             elif agent_name == "publisher":
                 import json as _json
                 auto_ids = resolve_playlist_ids(
@@ -323,12 +433,44 @@ class Agent(BaseAgent):
                         f"[EP] Publisher: {len(playlist_ids)} playlist(s) — "
                         f"auto={auto_ids} extra={extra_ids}"
                     )
+                if output_dir:
+                    step_input += f"\n\nMEDIA_DIR: {output_dir}/media"
+                show_ep = state.get("show_name", "")
+                if show_ep:
+                    step_input += f"\nSHOW_NAME: {show_ep}"
 
             result = await agent.process_message(step_input)
             outputs = dict(state.get("outputs", {}))
             anchor_output = result.get("response", "")
             outputs[agent_name] = anchor_output
             state["outputs"] = outputs
+
+            # Guard: abort if researcher returned failure/empty content instead of real research.
+            if agent_name == "researcher":
+                _failure_phrases = [
+                    "unable to access", "can't provide", "cannot provide",
+                    "persistent issue", "i'm unable", "i cannot",
+                    "failed to retrieve", "unable to retrieve",
+                    "no results found", "unfortunately, without",
+                ]
+                _out_lower = anchor_output.lower()
+                _has_failure = any(p in _out_lower for p in _failure_phrases)
+                _has_sources = "http" in anchor_output or any(
+                    kw in _out_lower
+                    for kw in ("according to", "reported that", "sources:", "source:", "published")
+                )
+                _too_short = len(anchor_output.strip()) < 300
+                if (_has_failure or _too_short) and not _has_sources:
+                    logger.warning(
+                        f"[EP] Researcher returned failure output (len={len(anchor_output)}) — "
+                        "aborting pipeline. Likely cause: Tavily API unavailable or rate-limited."
+                    )
+                    state["researcher_failed"] = True
+                    state["error"] = (
+                        "Researcher was unable to retrieve source material "
+                        "(Tavily API may be unavailable or rate-limited). "
+                        "Production halted — no article or video generated."
+                    )
 
             # If the anchor step returned no video_id, flag the pipeline to stop.
             if agent_name == "anchor":
@@ -360,8 +502,7 @@ class Agent(BaseAgent):
         idx = state.get("current_step_index", 0)
         if idx >= len(state["steps"]):
             return "done"
-        # anchor_failed flag is set by _execute_step_node when HeyGen returns no video_id
-        if state.get("anchor_failed"):
+        if state.get("researcher_failed") or state.get("anchor_failed"):
             return "done"
         return "next_step"
 
@@ -374,8 +515,10 @@ class Agent(BaseAgent):
         desk_name = state.get("desk_name", "")
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
+        show_name = state.get("show_name", "")
         lines = [
             f"**Production Complete — {state['workflow']}**",
+            f"Show: {show_name}" if show_name else "",
             f"Topic: {state['topic']}",
             f"Desk: {desk_name}" if desk_name else "",
             f"Anchor: {anchor_name}" if anchor_name else "",
@@ -391,17 +534,19 @@ class Agent(BaseAgent):
             lines.append(f"**{step.replace('_', ' ').title()}:**\n{preview}")
             lines.append("")
 
-        if state.get("error"):
+        if state.get("researcher_failed"):
+            lines.append(f"🛑 PRODUCTION ABORTED — Researcher returned no usable content. {state.get('error', '')}")
+        elif state.get("error"):
             lines.append(f"⚠️ One or more steps encountered an error: {state['error']}")
 
         state["final_summary"] = "\n".join(lines)
 
         # Save full production log (all outputs untruncated)
         try:
-            log_dir = Path(settings.LOGS_DIR)
+            _out = state.get("output_dir", "")
+            log_dir = Path(_out) / "production_logs" if _out else Path(settings.LOGS_DIR)
             log_dir.mkdir(parents=True, exist_ok=True)
-            ts_file = datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_path = log_dir / f"production_{ts_file}.md"
+            log_path = log_dir / "production.md"
 
             full_lines = [
                 f"# Production Log — {state['workflow']}",
@@ -429,6 +574,20 @@ class Agent(BaseAgent):
         except Exception as e:
             logger.warning(f"[EP] Could not save production log: {e}")
 
+        # Write last_broadcast.json for the breaking news checker's anchor handoff logic
+        try:
+            lb_path = Path("./output/last_broadcast.json")
+            lb_path.parent.mkdir(parents=True, exist_ok=True)
+            now_utc = datetime.now(timezone.utc)
+            lb_path.write_text(json.dumps({
+                "show_slug": state.get("show_slug", ""),
+                "show_name": state.get("show_name", ""),
+                "ts": now_utc.isoformat(),
+                "ts_unix": now_utc.timestamp(),
+            }, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"[EP] Could not save last_broadcast.json: {e}")
+
         return state
 
     # ------------------------------------------------------------------ #
@@ -455,11 +614,17 @@ class Agent(BaseAgent):
                 "anchor_talking_style": "",
                 "anchor_expression": "",
                 "target_duration_seconds": None,
+                "show_slug": (context or {}).get("show_slug", ""),
+                "show_name": "",
+                "show_tone": "",
+                "output_dir": "",
+                "run_id": "",
                 "playlist_ids": [],
                 "extra_playlist_keys": [],
                 "outputs": {},
                 "current_step_index": 0,
                 "anchor_failed": False,
+                "researcher_failed": False,
                 "error": None,
                 "final_summary": "",
             }

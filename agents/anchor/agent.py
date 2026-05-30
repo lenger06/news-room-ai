@@ -97,6 +97,34 @@ class Agent(BaseAgent):
             text = text.replace(f"\x00BROLL{i}\x00", marker)
         return text
 
+    def _regex_clean_script(self, script: str) -> str:
+        """Pure-regex cleaner. Strips broadcast-direction markers while preserving [BROLL:] markers exactly."""
+        broll_markers: list[str] = []
+        def _stash(m: re.Match) -> str:
+            broll_markers.append(m.group(0))
+            return f"\x00BROLL{len(broll_markers)-1}\x00"
+        text = re.sub(r'\[BROLL:[^\]]*\]', _stash, script, flags=re.IGNORECASE)
+
+        # Remove standalone markdown heading lines BEFORE stripping markers, so the text
+        # "Introduction" / "Background and Context" etc. is deleted entirely rather than
+        # left as a spoken word after the ** or # characters are stripped.
+        # Matches lines whose entire content is a markdown heading or bold phrase.
+        text = re.sub(r'(?m)^\s*#{1,6}[^\n]+\n?', '', text)           # # Heading
+        text = re.sub(r'(?m)^\s*\*\*[^*\n]+\*\*\s*\n?', '', text)     # **Bold heading**
+
+        text = re.sub(r'\[PAUSE\]', ', ', text, flags=re.IGNORECASE)
+        text = re.sub(r'\[GRAPHIC:[^\]]*\]', '', text, flags=re.IGNORECASE)
+        # Remove any remaining [...] — pronunciation guides, missed directives, etc.
+        text = re.sub(r'\[[^\]]*\]', '', text)
+        text = re.sub(r'\*+|_+|`+|#{1,6}\s*', '', text)
+        text = re.sub(r'  +', ' ', text)
+        text = re.sub(r' ,', ',', text)
+        text = re.sub(r',,+', ',', text)
+
+        for i, marker in enumerate(broll_markers):
+            text = text.replace(f"\x00BROLL{i}\x00", marker)
+        return text.strip()
+
     # ── B-roll parsing ───────────────────────────────────────────────────────
 
     def _parse_segments(self, script: str) -> list[dict]:
@@ -417,15 +445,16 @@ class Agent(BaseAgent):
             bg_id = enhanced_bg_id  # use for all scenes going forward
 
             # Step 2: Extract the broadcast script from EP context, then clean it.
-            # Prefer the inline === SCRIPT === block the script_writer appends; fall back to
-            # the full SCRIPT_WRITER OUTPUT section if that marker is absent.
+            # Stop extraction before the HeyGen params / "Now perform your role" instruction
+            # so the LLM cleaner only sees the script text and doesn't hallucinate.
+            _script_boundary = r'(?=\n\nNow perform your role|\n\nANCHOR NAME:|\n\nAVATAR ID:|===|\Z)'
             script_match = re.search(
-                r'=== SCRIPT ===\s*(.*?)(?:===|\Z)',
+                r'=== SCRIPT ===\s*(.*?)' + _script_boundary,
                 message, re.DOTALL | re.IGNORECASE,
             )
             if not script_match:
                 script_match = re.search(
-                    r'=== SCRIPT_WRITER OUTPUT ===\s*(.*?)(?:===|\Z)',
+                    r'=== SCRIPT_WRITER OUTPUT ===\s*(.*?)' + _script_boundary,
                     message, re.DOTALL | re.IGNORECASE,
                 )
             script_to_clean = script_match.group(1).strip() if script_match else message
@@ -433,7 +462,7 @@ class Agent(BaseAgent):
                 logger.info(f"[anchor] Extracted script ({len(script_to_clean)} chars): {script_to_clean[:120]!r}")
             else:
                 logger.warning("[anchor] No script section found — using full message")
-            cleaned = await asyncio.to_thread(self._clean_script_sync, script_to_clean)
+            cleaned = self._regex_clean_script(script_to_clean)
             logger.info(f"[anchor] Cleaned script ({len(cleaned)} chars): {cleaned[:120]!r}")
 
             # Step 3: Parse [BROLL:] markers into segments

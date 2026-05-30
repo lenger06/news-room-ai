@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import json
+import re
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -49,7 +50,7 @@ async def lifespan(app: FastAPI):
     settings.validate()
 
     from agents.registry import agent_registry
-    for name in ["researcher", "writer", "fact_checker", "script_writer", "anchor", "video_editor", "producer", "publisher", "executive_producer"]:
+    for name in ["researcher", "writer", "fact_checker", "script_writer", "anchor", "video_editor", "producer", "publisher", "executive_producer", "breaking_news_checker"]:
         agent = await agent_registry.get_agent(name)
         logger.info(f"  {'✓' if agent else '✗'} {name}")
 
@@ -80,9 +81,30 @@ app.add_middleware(
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
+def _extract_break_check(text: str) -> tuple[str, bool]:
+    """Detect [BREAK-CHECK] tag — routes to breaking_news_checker instead of EP.
+    Searches anywhere in the text to handle a leading [Current date/time: ...] prefix."""
+    m = re.search(r"\[BREAK-CHECK\]", text, re.IGNORECASE)
+    if m:
+        cleaned = (text[:m.start()] + text[m.end():]).strip()
+        return cleaned, True
+    return text, False
+
+
+def _extract_show_slug(text: str) -> tuple[str, Optional[str]]:
+    """Extract [SHOW: slug] tag from message, return (cleaned_text, show_slug).
+    Searches anywhere in the text to handle a leading [Current date/time: ...] prefix."""
+    m = re.search(r"\[SHOW:\s*([\w-]+)\]", text)
+    if m:
+        cleaned = (text[:m.start()] + text[m.end():]).strip()
+        return cleaned, m.group(1)
+    return text, None
+
+
 class ProductionRequest(BaseModel):
     request: str                          # Natural language production request
     client_datetime: Optional[str] = None
+    show_slug: Optional[str] = None       # e.g. "morning-report", "evening-news" — None = auto-detect
 
 
 class ProductionResponse(BaseModel):
@@ -100,7 +122,7 @@ async def root():
         "name": "Newsroom AI",
         "version": "1.0.0",
         "status": "running",
-        "workflows": ["RESEARCH_ONLY", "ARTICLE", "FULL_PRODUCTION", "BROADCAST_VIDEO", "SCRIPT_ONLY", "VIDEO_FROM_SCRIPT"],
+        "workflows": ["RESEARCH_ONLY", "ARTICLE", "FULL_PRODUCTION", "BROADCAST_VIDEO", "SCRIPT_ONLY", "VIDEO_FROM_SCRIPT", "SPECIAL_REPORT"],
         "endpoints": {
             "produce": "POST /produce",
             "produce_stream": "POST /produce/stream",
@@ -127,15 +149,31 @@ async def produce(body: ProductionRequest):
     """Trigger a newsroom production run."""
     try:
         from agents.registry import agent_registry
+
+        # Route breaking news checks to the dedicated checker agent
+        message, is_break_check = _extract_break_check(body.request)
+        if is_break_check:
+            checker = await agent_registry.get_agent("breaking_news_checker")
+            if not checker:
+                raise HTTPException(status_code=503, detail="Breaking News Checker not available")
+            result = await checker.process_message(message)
+            return ProductionResponse(
+                success=result.get("success", False),
+                response=result.get("response", ""),
+                agent="breaking_news_checker",
+            )
+
         ep = await agent_registry.get_agent("executive_producer")
         if not ep:
             raise HTTPException(status_code=503, detail="Executive Producer not available")
 
-        message = body.request
-        if body.client_datetime:
+        message, extracted_show = _extract_show_slug(message)
+        show_slug = body.show_slug or extracted_show
+        if body.client_datetime and "[Current date/time:" not in message:
             message = f"[Current date/time: {body.client_datetime}]\n{message}"
 
-        result = await ep.process_message(message)
+        context = {"show_slug": show_slug} if show_slug else {}
+        result = await ep.process_message(message, context=context)
         return ProductionResponse(
             success=result.get("success", False),
             response=result.get("response", ""),
@@ -163,11 +201,13 @@ async def produce_stream(body: ProductionRequest):
 
             yield f"data: {json.dumps({'type': 'status', 'content': 'Production started...'})}\n\n"
 
-            message = body.request
-            if body.client_datetime:
+            message, extracted_show = _extract_show_slug(body.request)
+            show_slug = body.show_slug or extracted_show
+            if body.client_datetime and "[Current date/time:" not in message:
                 message = f"[Current date/time: {body.client_datetime}]\n{message}"
 
-            result = await ep.process_message(message)
+            context = {"show_slug": show_slug} if show_slug else {}
+            result = await ep.process_message(message, context=context)
 
             yield f"data: {json.dumps({'type': 'result', 'content': result.get('response', ''), 'workflow': result.get('workflow'), 'topic': result.get('topic')})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -192,17 +232,33 @@ async def produce_async(body: ProductionRequest):
     async def run_job():
         try:
             from agents.registry import agent_registry
+
+            # Route breaking news checks to the dedicated checker agent
+            raw, is_break_check = _extract_break_check(body.request)
+            if is_break_check:
+                checker = await agent_registry.get_agent("breaking_news_checker")
+                if not checker:
+                    _jobs[job_id]["status"] = "error"
+                    _jobs[job_id]["error"] = "Breaking News Checker not available"
+                    return
+                result = await checker.process_message(raw)
+                _jobs[job_id]["status"] = "complete"
+                _jobs[job_id]["result"] = result.get("response", "")
+                return
+
             ep = await agent_registry.get_agent("executive_producer")
             if not ep:
                 _jobs[job_id]["status"] = "error"
                 _jobs[job_id]["error"] = "Executive Producer not available"
                 return
 
-            message = body.request
-            if body.client_datetime:
+            message, extracted_show = _extract_show_slug(body.request)
+            show_slug = body.show_slug or extracted_show
+            if body.client_datetime and "[Current date/time:" not in message:
                 message = f"[Current date/time: {body.client_datetime}]\n{message}"
 
-            result = await ep.process_message(message)
+            context = {"show_slug": show_slug} if show_slug else {}
+            result = await ep.process_message(message, context=context)
             _jobs[job_id]["status"] = "complete"
             _jobs[job_id]["result"] = result.get("response", "")
             _jobs[job_id]["workflow"] = result.get("workflow")

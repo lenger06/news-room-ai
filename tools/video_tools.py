@@ -113,6 +113,90 @@ def assemble_final_video(broadcast_path: Path) -> Path | None:
 prepend_promo = assemble_final_video
 
 
+def compose_foreground_layers(video_path: Path, layers: list) -> Path | None:
+    """
+    FFmpeg: composite n foreground overlay images/videos on top of the broadcast video.
+    Preserves the original video duration and audio. Outputs to fg_{stem}.mp4 in the
+    same directory. Returns the output path, or None if layers is empty or FFmpeg fails.
+    """
+    if not layers:
+        return None
+
+    ffmpeg = _get_ffmpeg()
+    if not ffmpeg:
+        logger.warning("[video_editor] FFmpeg not found — skipping foreground layers")
+        return None
+
+    _project_root = Path(__file__).resolve().parent.parent
+    resolved: list[tuple] = []
+    for l in layers:
+        src = Path(l.source)
+        if not src.is_absolute():
+            src = _project_root / l.source
+        if src.exists():
+            resolved.append((l, src))
+        else:
+            logger.warning(f"[video_editor] Foreground layer file not found: {src}")
+
+    if not resolved:
+        logger.warning("[video_editor] No foreground layer files found — skipping")
+        return None
+
+    out_path = video_path.parent / f"fg_{video_path.stem}.mp4"
+
+    cmd = [ffmpeg, "-y", "-i", str(video_path)]
+    for layer, src in resolved:
+        if src.suffix.lower() in (".mp4", ".mov", ".webm"):
+            cmd += ["-stream_loop", "-1", "-i", str(src)]
+        else:
+            cmd += ["-loop", "1", "-i", str(src)]
+
+    def _scale(layer) -> str:
+        if layer.width and layer.height:
+            return f"scale={layer.width}:{layer.height}"
+        if layer.width:
+            return f"scale={layer.width}:-2"
+        if layer.height:
+            return f"scale=-2:{layer.height}"
+        return "scale=iw:ih"
+
+    filter_parts = []
+    prev = "0:v"
+    for i, (layer, _) in enumerate(resolved, 1):
+        s_label = f"s{i}"
+        o_label = f"o{i}"
+        filter_parts.append(f"[{i}:v]{_scale(layer)}[{s_label}]")
+        filter_parts.append(f"[{prev}][{s_label}]overlay={layer.x}:{layer.y}[{o_label}]")
+        prev = o_label
+
+    cmd += [
+        "-filter_complex", ";".join(filter_parts),
+        "-map", f"[{prev}]",
+        "-map", "0:a",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        str(out_path),
+    ]
+
+    layers_desc = ", ".join(src.name for _, src in resolved)
+    logger.info(f"[video_editor] Compositing foreground layers: {layers_desc}")
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=600)
+        if result.returncode != 0:
+            logger.warning(
+                f"[video_editor] Foreground layers FFmpeg failed (rc={result.returncode}): "
+                f"{result.stderr.decode(errors='replace')[-800:]}"
+            )
+            return None
+        size = out_path.stat().st_size
+        logger.info(f"[video_editor] Foreground composite done ({size:,} bytes): {out_path.name}")
+        return out_path
+    except Exception as e:
+        logger.warning(f"[video_editor] compose_foreground_layers error: {e}")
+        return None
+
+
 @tool
 def download_video(
     url: str,

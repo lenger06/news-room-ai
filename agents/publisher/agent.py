@@ -8,6 +8,7 @@ if str(project_root) not in sys.path:
 import asyncio
 import json
 import logging
+import re
 from langchain.agents import create_openai_functions_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_openai import ChatOpenAI
@@ -18,7 +19,7 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-MEDIA_DIR = "./output/media"
+_MEDIA_DIR_DEFAULT = "./output/media"
 
 
 class Agent(BaseAgent):
@@ -47,6 +48,14 @@ class Agent(BaseAgent):
             module_path="agents.publisher.agent",
             parent_agent="executive_producer",
         )
+
+    def _parse_media_dir(self, message: str) -> str:
+        m = re.search(r"MEDIA_DIR:\s*(\S+)", message)
+        return m.group(1) if m else _MEDIA_DIR_DEFAULT
+
+    def _parse_show_name(self, message: str) -> str:
+        m = re.search(r"SHOW_NAME:\s*(.+?)(?:\n|$)", message)
+        return m.group(1).strip() if m else ""
 
     def _upload_sync(self, video_file: str, title: str, description: str,
                      tags: list, privacy: str) -> dict:
@@ -132,8 +141,11 @@ class Agent(BaseAgent):
 
     async def process_message(self, message: str, context: dict = None) -> dict:
         try:
+            media_dir = self._parse_media_dir(message)
+            show_name = self._parse_show_name(message)
+
             # Guard: bail out early if this package was already uploaded
-            pkg_path = Path(MEDIA_DIR) / "video_package.json"
+            pkg_path = Path(media_dir) / "video_package.json"
             if pkg_path.exists():
                 try:
                     existing = json.loads(pkg_path.read_text(encoding="utf-8"))
@@ -154,14 +166,24 @@ class Agent(BaseAgent):
             # Step 1: LLM reads video_package.json and returns structured metadata as JSON
             result = await asyncio.to_thread(
                 self.executor.invoke,
-                {"input": message + "\n\nRead the video_package.json and return the upload metadata as JSON with keys: video_file, title, description, tags (list), privacy_status, thumbnail_url.", "chat_history": []}
+                {"input": message + f"\n\nRead video_package.json from directory: {media_dir}\nReturn the upload metadata as JSON with keys: video_file, title, description, tags (list), privacy_status, thumbnail_url.", "chat_history": []}
             )
             llm_output = result.get("output", "")
 
             # Step 2: Parse metadata from LLM output
-            metadata = self._extract_metadata(llm_output)
+            metadata = self._extract_metadata(llm_output, media_dir=media_dir)
             if "error" in metadata:
                 return {"success": False, "response": f"Publisher failed to read package: {metadata['error']}", "agent": "publisher"}
+
+            # Rebuild title: "Defy Logic News | Show Name | Story Title"
+            raw = metadata.get("title", "News Video")
+            newsroom = settings.NEWSROOM_NAME
+            bare = raw[len(newsroom):].lstrip(" |").strip() if raw.startswith(newsroom) else raw
+            parts = [newsroom]
+            if show_name:
+                parts.append(show_name)
+            parts.append(bare)
+            metadata["title"] = " | ".join(parts)
 
             video_file = metadata.get("video_file", "")
             title = metadata.get("title", "Defy Logic News Video")
@@ -183,7 +205,7 @@ class Agent(BaseAgent):
 
             # Mark the package as uploaded so re-runs don't duplicate it
             try:
-                pkg_path = Path(MEDIA_DIR) / "video_package.json"
+                pkg_path = Path(media_dir) / "video_package.json"
                 if pkg_path.exists():
                     pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
                     pkg["youtube_video_id"] = youtube_video_id
@@ -247,10 +269,8 @@ class Agent(BaseAgent):
                 pass
         return []
 
-    def _extract_metadata(self, text: str) -> dict:
-        """Extract upload metadata from LLM output — tries JSON blocks first, then key scanning."""
-        # Try fenced JSON block
-        import re
+    def _extract_metadata(self, text: str, media_dir: str = _MEDIA_DIR_DEFAULT) -> dict:
+        """Extract upload metadata from LLM output — tries JSON blocks first, then reads package directly."""
         for pattern in [r"```json\s*(\{.*?\})\s*```", r"```\s*(\{.*?\})\s*```", r"(\{[^{}]*\"video_file\"[^{}]*\})"]:
             m = re.search(pattern, text, re.DOTALL)
             if m:
@@ -259,19 +279,15 @@ class Agent(BaseAgent):
                 except Exception:
                     pass
 
-        # Try reading video_package.json directly as fallback
+        # Fallback: read video_package.json directly
         try:
-            pkg_path = Path(MEDIA_DIR) / "video_package.json"
+            pkg_path = Path(media_dir) / "video_package.json"
             if pkg_path.exists():
                 pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
-                newsroom = settings.NEWSROOM_NAME
-                raw_title = pkg.get("title", "News Video")
-                title = f"{newsroom} | {raw_title}" if not raw_title.startswith(newsroom) else raw_title
-                desc = pkg.get("description", "") + f"\n\n{newsroom}"
                 return {
                     "video_file": pkg.get("video_file", ""),
-                    "title": title,
-                    "description": desc,
+                    "title": pkg.get("title", "News Video"),
+                    "description": pkg.get("description", "") + f"\n\n{settings.NEWSROOM_NAME}",
                     "tags": pkg.get("tags", []),
                     "privacy_status": "unlisted",
                     "thumbnail_url": pkg.get("thumbnail_url", ""),

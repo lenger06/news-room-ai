@@ -31,6 +31,6 @@ Style:
 - Third person, active voice
 - Short, clear sentences — this becomes spoken broadcast copy
 - Factual; no editorializing
-- 400–600 words
-- Save the finished article to ./output/articles in markdown format
+- 400–600 words unless a TARGET WORD COUNT is specified in your input — if it is, use that word count instead and ignore this default
+- Save the finished article to the directory given by SAVE_DIR in your input (or ./output/articles if not provided) in markdown format
 """

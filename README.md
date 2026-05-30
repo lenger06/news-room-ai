@@ -42,11 +42,21 @@ News segment on the latest Congressional budget vote
 ```
 Generate a news video about the Fed rate decision
 Produce a broadcast video on the Iran conflict and publish it to YouTube
-Create a news video covering the Supreme Court's latest ruling — have Alex Morgan read it
-Generate a video on the White House press conference — have Rick Johnson anchor it
+Create a news video covering the Supreme Court's latest ruling — have Shawn Green read it
+Generate a video on the White House press conference — have Daniel Mercer anchor it
 Produce a broadcast video on the rescue of the downed pilots — have Darlene Smith read it
 Publish a news video on the latest developments in Ukraine
 ```
+
+### Special Report (Long-form, in-depth)
+
+```
+[SHOW: special-report] Do an in-depth special report on the New Glenn rocket development and the Blue Origin explosion. Make it approximately 15 minutes.
+Special report on the history and future of US nuclear policy — serious tone, 10 minutes
+Do a deep dive on the opioid crisis — causes, current state, and what comes next
+```
+
+Special reports default to 10 minutes if no duration is specified. The pipeline runs the same steps as a Broadcast Video but with extended research (8–10 search angles), a long-form analytical article format, and a script written to fill the full target duration.
 
 ### Script Only (when you already have article content)
 
@@ -60,33 +70,108 @@ Script only for this story: [paste text]
 
 ```
 Generate a video from this script — have Shawn Green read it: [paste script]
-Record this script with Rick Johnson: [paste script]
-Video from script, use Alex Morgan: [paste script]
+Record this script with Daniel Mercer: [paste script]
+Video from script, use Alexa Chen: [paste script]
 ```
 
 ### Requesting a Specific Anchor
 
 ```
-Produce a broadcast video on the Iran war — have Rick Johnson read it
+Produce a broadcast video on the Iran war — have Shawn Green read it
 Generate a news video with Darlene Smith anchoring
-Alex Morgan should read the Supreme Court story
-Have Shawn Green anchor the White House briefing video
+Alexa Chen should read the entertainment roundup
+Have Daniel Mercer anchor the White House briefing video
 ```
 
-> If no anchor is specified, the Executive Producer picks one at random from the roster.
+> If no anchor is specified, the Executive Producer selects the anchor assigned to the active show and desk.
+
+---
+
+## Shows & Scheduling
+
+The Executive Producer auto-detects the active broadcast based on time of day and day of week:
+
+| Show | Slug | Trigger | Tone |
+|------|------|---------|------|
+| Morning Report | `morning-report` | Weekdays before 1 pm | Conversational and upbeat |
+| Evening News | `evening-news` | Weekdays 1 pm–midnight | Serious and authoritative |
+| Weekend Roundup | `weekend-roundup` | Saturdays and Sundays | Measured and reflective |
+| Entertainment Weekly | `entertainment-weekly` | Scheduled explicitly | Upbeat and conversational |
+| Special Report | `special-report` | "special report", "deep dive", "in-depth", "long-form" | Measured, thorough, and authoritative |
+| Breaking News | `breaking-news` | Breaking News Checker agent | Urgent and direct |
+
+Each show defines which anchor covers which desk and can specify a look preference (formal, casual, sitting, etc.). To override the auto-detected show, prefix your request with `[SHOW: slug]`:
+
+```
+[SHOW: special-report] In-depth report on the future of nuclear energy
+[SHOW: breaking-news] Alert: major earthquake reported in Tokyo
+```
+
+Show definitions live in `config/shows.py`.
+
+---
+
+## Anchor Roster & Look Rotation
+
+Anchors are defined in `config/anchors.py`. Each anchor has an on-air name, one or more `AvatarLook` entries (avatar IDs from HeyGen), a voice ID, and a bio.
+
+The Executive Producer selects the anchor assigned to the active show and desk, then rotates through that anchor's looks round-robin on each production. A `look_preference` (e.g. "formal", "casual") filters the rotation pool to matching looks. Shows can also configure a stand-in anchor that rotates in every N productions (`alt_anchor_name` / `alt_every`).
+
+**Current roster:**
+
+| On-air name | HeyGen actor | Desks |
+|---|---|---|
+| Shawn Green | Shawn (3 looks) | Politics, National, Foreign, Special Reports |
+| Daniel Mercer | Daniel Mercer | National, Politics, Foreign (Morning Report lead) |
+| Nicholas Stavros | Kurt | National (Evening News lead) |
+| Dominic Fairchild | Man in the Sport Coat | Politics, National |
+| Alexa Chen | Alexa | Entertainment |
+| Monica Hayes | Saskia (3 looks) | Entertainment |
+| Valerie Brooks | Candace (2 looks) | Entertainment |
+| Zayne Carter | Zayne (2 looks) | Entertainment |
+| Karoline Faye | Brooklyn (2 looks) | Entertainment |
+| Victor Marinos | Ricardo (3 looks) | Politics |
+| Brandon Jones | Brandon in Grey Suit | Business |
+| Alister Blackwood | Dexter Suit Front | Investigative |
+| Darlene Smith | Crystal Veil | Health & Science |
+
+To add an anchor, add an entry to the `ANCHORS` list in `config/anchors.py`. Each look is an `AvatarLook(avatar_id, description)` — HeyGen names are noted in comments next to each ID:
+
+```python
+Anchor(
+    name="Jordan Lee",
+    avatars=[
+        AvatarLook("avatar_id_here", "formal suit, news desk — hard news"),  # HeyGen: "Avatar Name"
+    ],
+    voice_id="voice_id_here",
+    desk="national",
+    bio="Warm and conversational. Strong on human interest stories.",
+)
+```
+
+Get IDs by calling with your HeyGen API key:
+- `GET https://api.heygen.com/v2/avatars`
+- `GET https://api.heygen.com/v2/voices`
 
 ---
 
 ## Agent Roles
 
 ### Executive Producer
-The orchestrator. Receives every production request, determines the appropriate workflow, selects an anchor from the roster, and delegates to the team in sequence. Saves a full production log to `./output/production_logs/` at the end of every run.
+The orchestrator. Receives every production request, determines the appropriate workflow, auto-detects the active show, selects and rotates anchors per show schedule, and delegates to the team in sequence. Aborts the pipeline early if the Researcher returns no usable content (Tavily unavailable or rate-limited) rather than producing and publishing an empty broadcast. Saves a full production log to `./output/{show_slug}/{run_id}/production_logs/` at the end of every run.
+
+### Breaking News Checker
+A background monitor (runs via Jarvis scheduler) that checks for significant breaking news every few minutes. Uses an LLM to evaluate whether current events meet broadcast-worthy criteria — major political events, natural disasters, crashes, explosions, corporate collapses, and more. When a qualifying story is detected, it triggers an immediate Breaking News production and suppresses re-alerts for the same story for 2 hours. Criteria are defined in `agents/breaking_news_checker/prompts.py`.
 
 ### Researcher
 Gathers source material using real-time web search (Tavily). Searches for multiple angles — latest developments, background context, key figures, and statistics. Compiles a sourced research brief with URLs. Also sources b-roll media: still images via Tavily and short video clips via the Pixabay API (if configured). Outputs a `## SOURCED B-ROLL IMAGES` and `## SOURCED B-ROLL VIDEOS` section for the script writer to choose from.
 
+In Special Report mode: runs 8–10 searches across seven angles (latest developments, historical timeline, key figures, expert analysis, opposing viewpoints, economic/social impact, and international context) to build a research brief comprehensive enough to support a 10+ minute broadcast.
+
 ### Writer
-Receives the research brief and writes a polished news article in broadcast style — inverted pyramid structure, active voice, short sentences, 400–600 words. Includes a branded dateline (e.g. "WASHINGTON — Defy Logic News"). Saves to `./output/articles/`.
+Receives the research brief and writes a polished news article. Standard productions target 400–600 words in broadcast style (inverted pyramid, active voice, short sentences). When a target duration is specified, the word count scales proportionally (~150 words per minute). Includes a branded dateline. Saves to `./output/{show_slug}/{run_id}/articles/`.
+
+In Special Report mode: writes a long-form analytical piece structured as Executive Summary → Background & Context → Key Developments → Multiple Perspectives & Expert Analysis → Implications & What's Next → Conclusion. May add explanatory context and analytical commentary beyond the raw research facts to fill the target word count.
 
 ### Fact Checker
 Reads the draft article and verifies key factual claims using web search. Priority check: confirms the current title and status of every named political figure, head of state, and official — "former" applied to a sitting official is a broadcast-level error. Produces a Fact Check Report with three sections — **Verified**, **Unverified**, and **Corrections Needed** — and issues one of three verdicts:
@@ -98,40 +183,19 @@ Reads the draft article and verifies key factual claims using web search. Priori
 Receives the draft article and the Fact Check Report. Applies every correction listed under Corrections Needed — uses web search to confirm accurate information before making each change. Particular focus on current vs. former titles for political figures and officials. Outputs the complete corrected article plus an editorial note listing every change made. The Script Writer uses this corrected article, not the original draft.
 
 ### Script Writer
-Converts the editor-reviewed article into a spoken broadcast anchor script. Formats it for on-air delivery: natural spoken English, breath-pause markers, and `[GRAPHIC: ...]` cues for supporting visuals. Places `[BROLL: url | description]` markers for still images and `[BROLL: url | description | video]` markers for video clips at the start of each topic — B-roll switches the instant the marker is reached. Uses the selected anchor's name in the sign-off (e.g. "I'm Alex Morgan, Defy Logic News."). Target read time: 60–90 seconds. Saves to `./output/scripts/`.
+Converts the editor-reviewed article into a spoken broadcast anchor script. Formats it for on-air delivery: natural spoken English, breath-pause markers, and `[GRAPHIC: ...]` cues for supporting visuals. Places `[BROLL: url | description]` markers for still images and `[BROLL: url | description | video]` markers for video clips — B-roll markers must appear at the very start of each new story segment so the visual switches the instant the topic changes. Uses the selected anchor's name in the sign-off. Target read time scales with the requested duration. Saves to `./output/{show_slug}/{run_id}/scripts/`.
 
 ### Anchor
-Takes the broadcast script, cleans it for spoken delivery, and submits it to HeyGen using the selected anchor's avatar and voice IDs. For scenes with `[BROLL:]` markers, b-roll media (still images **or** video clips) is composited as a Picture-in-Picture in the upper-left corner of the studio background video using FFmpeg, uploaded as a new HeyGen video asset, and used as the scene background. The PIP preserves the original aspect ratio of the source media. Video clip b-roll loops seamlessly for the duration of the scene. Falls back to a Pillow static image composite if FFmpeg is unavailable (images only). Polls for completion natively in Python (every 30 seconds, up to 10 minutes) — does not rely on the LLM to manage polling. Returns the video URL and thumbnail URL when complete.
+Takes the broadcast script, strips formatting markers with a pure-regex cleaner (no LLM pass — prevents refusal text from being read aloud), and submits it to HeyGen using the selected anchor's avatar and voice IDs. For scenes with `[BROLL:]` markers, b-roll media (still images **or** video clips) is composited as a Picture-in-Picture in the upper-left corner of the studio background video using FFmpeg, uploaded as a new HeyGen video asset, and used as the scene background. The PIP preserves the original aspect ratio of the source media. Video clip b-roll loops seamlessly for the duration of the scene. Falls back to a Pillow static image composite if FFmpeg is unavailable (images only). Polls for completion natively in Python (every 30 seconds, up to 10 minutes) — does not rely on the LLM to manage polling. Returns the video URL and thumbnail URL when complete.
 
 ### Video Editor
-Downloads the completed anchor video from HeyGen, extracts all `[GRAPHIC: ...]` cues from the script, and assembles a `video_package.json` in `./output/media/` containing the video file path, thumbnail URL, graphic cues, and suggested YouTube metadata.
+Downloads the completed anchor video from HeyGen, extracts all `[GRAPHIC: ...]` cues from the script, and assembles a `video_package.json` in `./output/{show_slug}/{run_id}/media/` containing the video file path, thumbnail URL, graphic cues, and suggested YouTube metadata.
 
 ### Producer
 Confirms all output files are saved and compiles a final production summary — article path, script path, video path, topic, and word counts.
 
 ### Publisher
-Reads `video_package.json`, uploads the finished MP4 to YouTube with branded title ("Defy Logic News | ...") and description, and sets the HeyGen thumbnail. Uploads exactly once in native Python. Returns the final YouTube URL.
-
----
-
-## Anchor Roster
-
-Anchors are defined in `config/anchors.py`. Each anchor has a name, HeyGen avatar ID, voice ID, and a brief bio that informs the script writer's tone.
-
-To add an anchor, add an entry to the `ANCHORS` list in `config/anchors.py`:
-
-```python
-Anchor(
-    name="Jordan Lee",
-    avatar_id="<avatar_id from GET /v2/avatars>",
-    voice_id="<voice_id from GET /v2/voices>",
-    bio="Warm and conversational. Strong on human interest stories.",
-)
-```
-
-Get IDs by calling with your HeyGen API key:
-- `GET https://api.heygen.com/v2/avatars`
-- `GET https://api.heygen.com/v2/voices`
+Reads `video_package.json`, uploads the finished MP4 to YouTube with branded title ("Defy Logic News | Morning Report | ...") and description, and sets the HeyGen thumbnail. Uploads exactly once in native Python. Returns the final YouTube URL.
 
 ---
 
@@ -143,8 +207,11 @@ Get IDs by calling with your HeyGen API key:
 | `ARTICLE` | "write an article", "write a story", "cover this story" | Researcher → Writer → Fact Checker → Editor → Producer |
 | `FULL_PRODUCTION` | "full production", "produce a segment", "news segment", "broadcast" | Researcher → Writer → Fact Checker → Editor → Script Writer → Producer |
 | `BROADCAST_VIDEO` | "video", "youtube", "record", "generate video", "publish" | Researcher → Writer → Fact Checker → Editor → Script Writer → Anchor → Video Editor → Producer → Publisher |
+| `SPECIAL_REPORT` | "special report", "deep dive", "in-depth", "long-form", "comprehensive coverage" | Same steps as BROADCAST_VIDEO with extended research, long-form writing, and full-duration scripting |
 | `SCRIPT_ONLY` | "script only", "write a script", "turn this into a script" (with content) | Script Writer → Producer |
 | `VIDEO_FROM_SCRIPT` | "video from script", "record this script", "generate video from script" | Anchor → Video Editor → Producer → Publisher |
+
+The pipeline aborts early and logs an error (without publishing) if the Researcher returns no usable content — e.g. when Tavily is rate-limited or unavailable.
 
 Each step receives the full output of all prior steps as context.
 
@@ -156,10 +223,11 @@ Each step receives the full output of all prior steps as context.
 Jarvis (or any HTTP client)
  └─► POST /produce/async
        └─► Executive Producer (orchestrator)
+             ├─► Breaking News Checker  — background monitor (Jarvis scheduler)
              ├─► Researcher      — web_research_tool, file_operations_tool
              ├─► Writer          — file_operations_tool
              ├─► Fact Checker    — web_research_tool
-             ├─► Editor          — web_research_tool, file_operations_tool (applies corrections)
+             ├─► Editor          — web_research_tool, file_operations_tool
              ├─► Script Writer   — file_operations_tool
              ├─► Anchor          — HeyGen API (generate + native async poll)
              ├─► Video Editor    — video_tools (download, extract cues, package)
@@ -167,13 +235,16 @@ Jarvis (or any HTTP client)
              └─► Publisher       — YouTube API (upload once + thumbnail)
 ```
 
-Output files are saved to:
+Output files are saved per-run under a timestamped directory:
 ```
 output/
-  articles/         — finished news articles (.md)
-  scripts/          — broadcast anchor scripts (.md)
-  media/            — anchor videos (.mp4) and video_package.json
-  production_logs/  — full production logs with all agent outputs (.md)
+  {show_slug}/
+    {run_id}/
+      articles/         — finished news articles (.md)
+      scripts/          — broadcast anchor scripts (.md)
+      media/            — anchor videos (.mp4) and video_package.json
+      production_logs/  — full production logs with all agent outputs (.md)
+  last_broadcast.json   — timestamp of the most recent completed production
 ```
 
 ---
@@ -217,7 +288,7 @@ See [`credentials/README.md`](credentials/README.md) for full step-by-step setup
 The Anchor agent composites b-roll media (still images or video clips) as a Picture-in-Picture overlay on a studio background video using FFmpeg, then uploads the result to HeyGen as a video asset.
 
 - Place background videos in `./assets/` named after their HeyGen video asset ID (e.g. `./assets/f6fa4085043140deaba8258a96233036.mp4`)
-- Multiple backgrounds are supported — each desk automatically uses its configured `background_asset_id` from `config/desks.py`
+- Multiple backgrounds are supported — each desk automatically uses its configured `background_asset_id` from `config/desks.py`; shows can override this with their own background (e.g. Special Report uses a distinct look)
 - Requires `imageio-ffmpeg` (already in `requirements.txt` — bundles FFmpeg, no system install needed)
 - Composite results are cached in `./cache/broll_composites/`; downloaded video clips cached in `./cache/broll_video_downloads/`
 - For video clips, the source footage loops seamlessly for the 15-second composite window HeyGen then loops
@@ -318,6 +389,7 @@ Jarvis, research the latest on shipping through the Strait of Hormuz
 Jarvis, generate a news video about the drone strike near Dubai — have Darlene Smith read it
 Jarvis, schedule a daily broadcast video at 6am on the latest White House announcements
 Jarvis, write a news article about the SpaceX launch
+Jarvis, do a special report on the development of the New Glenn rocket — make it 15 minutes
 ```
 
 Jarvis responds immediately confirming production has started, then notifies you when the video is published. The newsroom backend must be running at `http://localhost:8091`.

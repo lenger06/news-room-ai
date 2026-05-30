@@ -44,57 +44,83 @@ class Agent(BaseAgent):
         )
 
     async def process_message(self, message: str, context: dict = None) -> dict:
-        import re as _re
-        from pathlib import Path as _Path
         try:
             result = self.executor.invoke({"input": message, "chat_history": []})
             output = result.get("output", "")
 
             # Append the actual script text so downstream agents (anchor) can extract it
-            # without re-generating from context.
-            script_text = self._read_saved_script(output)
+            # without re-regenerating from context.
+            script_text = self._read_saved_script(output, message)
             if script_text:
                 output = f"{output}\n\n=== SCRIPT ===\n{script_text}"
+            else:
+                logger.warning("[script_writer] Could not locate saved script file — anchor will receive no script content")
 
             return {"success": True, "response": output, "agent": "script_writer"}
         except Exception as e:
             logger.error(f"Script Writer error: {e}", exc_info=True)
             return {"success": False, "response": f"Script writing failed: {str(e)}", "agent": "script_writer"}
 
-    def _read_saved_script(self, output: str) -> str | None:
+    def _read_saved_script(self, output: str, message: str = "") -> str | None:
         import re as _re
         from pathlib import Path as _Path
 
-        scripts_dir = _Path(settings.SCRIPTS_DIR)
-        if not scripts_dir.exists():
+        # Build ordered list of directories to search.
+        # The EP injects SAVE_DIR pointing to the per-run scripts folder — check it first.
+        search_dirs: list[_Path] = []
+        if message:
+            m = _re.search(r'SAVE_DIR[:\s]+([^\n]+)', message, _re.IGNORECASE)
+            if m:
+                run_dir = _Path(m.group(1).strip())
+                if run_dir.exists():
+                    search_dirs.append(run_dir)
+
+        # Also try the directory path the LLM mentions in its output message
+        dir_match = _re.search(r'(?:directory|folder)[:\s]+[`\'"]?(\./output/[^\s`\'"]+)[`\'"]?', output, _re.IGNORECASE)
+        if dir_match:
+            lm_dir = _Path(dir_match.group(1).strip())
+            if lm_dir.exists() and lm_dir not in search_dirs:
+                search_dirs.append(lm_dir)
+
+        # Global scripts dir as final fallback
+        global_dir = _Path(settings.SCRIPTS_DIR)
+        if global_dir.exists() and global_dir not in search_dirs:
+            search_dirs.append(global_dir)
+
+        if not search_dirs:
             return None
 
-        # Try several patterns the LLM uses to mention the filename
+        # Try to match a filename mentioned in the LLM output
+        fname = None
         for pattern in (
-            r'output[/\\]scripts[/\\]([\w\-\.]+\.md)',     # full path
-            r'filename\s+[`\'"]?([\w\-]+\.md)[`\'"]?',     # "filename `xxx.md`"
-            r'`([\w\-]+\.md)`',                             # backtick-quoted name
-            r'"([\w\-]+\.md)"',                             # double-quoted name
+            r'`([\w\-\.]+\.md)`',
+            r'"([\w\-\.]+\.md)"',
+            r"'([\w\-\.]+\.md)'",
+            r'filename\s+[`\'"]?([\w\-\.]+\.md)[`\'"]?',
         ):
-            match = _re.search(pattern, output, _re.IGNORECASE)
-            if match:
-                path = scripts_dir / match.group(1)
+            m = _re.search(pattern, output, _re.IGNORECASE)
+            if m:
+                fname = m.group(1)
+                break
+
+        for d in search_dirs:
+            if fname:
+                path = d / fname
                 if path.exists():
                     try:
                         content = path.read_text(encoding="utf-8").strip()
-                        logger.info(f"[script_writer] Appending script from {path.name}")
+                        logger.info(f"[script_writer] Appending script from {path}")
                         return content
                     except Exception as e:
                         logger.warning(f"[script_writer] Could not read {path}: {e}")
-
-        # Last resort: most recently modified .md in the scripts directory
-        try:
-            files = sorted(scripts_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
-            if files:
-                content = files[0].read_text(encoding="utf-8").strip()
-                logger.info(f"[script_writer] Appending most recent script: {files[0].name}")
-                return content
-        except Exception as e:
-            logger.warning(f"[script_writer] Could not read latest script: {e}")
+            # Fall back to most-recently-modified .md in this directory
+            try:
+                files = sorted(d.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if files:
+                    content = files[0].read_text(encoding="utf-8").strip()
+                    logger.info(f"[script_writer] Appending most recent script: {files[0]}")
+                    return content
+            except Exception as e:
+                logger.warning(f"[script_writer] Could not read latest script from {d}: {e}")
 
         return None

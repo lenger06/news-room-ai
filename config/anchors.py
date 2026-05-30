@@ -50,49 +50,142 @@ class Anchor:
 # ── Anchor Roster ─────────────────────────────────────────────────────────────
 
 ANCHORS: list[Anchor] = [
+
     Anchor(
-        name="Alex Morgan",
+        name="Shawn Green",
         avatars=[
-            AvatarLook("Andrew_public_pro1_20230614", "formal suit at the main news desk — hard news, breaking stories"),
-            # AvatarLook("<avatar_id>", "casual blazer, standing — feature stories and human interest"),
-            # AvatarLook("<avatar_id>", "outdoor live shot — field reports and on-location coverage"),
+            AvatarLook("Shawn_Suit_Front_public", "formal suit, neutral backdrop, Standing — international affairs and geopolitics"),           # HeyGen: "Shawn Suit Front"
+            AvatarLook("Shawn_Sitting_Front_public", "formal suit, neutral backdrop, Sitting — international affairs and geopolitics"),            # HeyGen: "Shawn Sitting Front"
+            AvatarLook("Shawn_Casual_Sitting_Front_public", "casual, neutral backdrop, Sitting — international affairs and geopolitics"),           # HeyGen: "Shawn Casual Sitting Front"
+            # AvatarLook("<avatar_id>", "field jacket, outdoor — war zone and conflict reporting"),
+            # AvatarLook("<avatar_id>", "business casual — diplomatic and economic foreign stories"),
         ],
-        voice_id="dc5370c68baa4905be87f702758df4b0",
-        desk="national",
-        bio="Lead anchor. Authoritative and composed. Delivers hard news with calm gravitas.",
+        voice_id="e1a429dbe823406dbae5fa7c3612314d",
+        desk="politics, national",
+        bio="Chief Foreign Correspondent. Measured and globally-informed. Covers international affairs and geopolitics.",
         voice_emotion="Broadcaster",
         talking_style="stable",
-    ),
+    ),    
     Anchor(
         name="Dominic Fairchild",
         avatars=[
-            AvatarLook("36b7514f60e44b7192dfdae1db6273c1", "informal shirt at entertainment desk — Entertainment, celebrity, culture, breaking stories"),
+            AvatarLook("f7bd87b360d143faadb4ded248f86299", "informal shirt at entertainment desk — Entertainment, celebrity, culture, breaking stories"),  # HeyGen: "Man in the Sport Coat"
             # AvatarLook("<avatar_id>", "standing in front of Capitol backdrop — election night and major votes"),
         ],
         voice_id="d60b050b12d9478493d0bd689ee7547b",
-        desk="politics",
+        desk="politics, national",
         bio="Chief Political Correspondent. Sharp and precise. Covers the White House, Congress, and elections.",
         voice_emotion="Friendly",
         talking_style="expressive",
         expression="happy",
     ),
     Anchor(
-        name="Rick Johnson",
+        name="Alexa Chen", # Alexa
         avatars=[
-            AvatarLook("ec08a8bb0119489aa0019a090274c631", "formal suit at politics desk — White House, Congress, elections"),
+            AvatarLook("a5454d8b999d4e5f87f486605465aae4", "Informal sweater , Entertainment news, entertainment and lifestyle stories"),  # HeyGen: "Alexa"
             # AvatarLook("<avatar_id>", "standing in front of Capitol backdrop — election night and major votes"),
         ],
-        voice_id="c701a9c07ff74f7ca9d71cbd24abb3a1",
+        voice_id="8901bf9a88a24f7c8b22bfe28e4bcc5b",
+        desk="entertainment",
+        bio="Chief Entertainment Correspondent. Sharp and precise. Covers entertainment, celebrity, and lifestyle stories.",
+        voice_emotion="Friendly",
+        talking_style="expressive",
+        expression="happy",
+    ),
+    Anchor(
+        name="Zayne Carter", # Zayne
+        avatars=[
+            AvatarLook("5c71aeacd9fc4b4f91c50312180f189b", "dress shirt , Entertainment news, entertainment and lifestyle stories"),  # HeyGen: "Zayne"
+            AvatarLook("1751694ccea0415eb8155ff49ce76255", "black suite , Entertainment news, entertainment and lifestyle stories"),  # HeyGen: "Zayne"
+              
+            # AvatarLook("<avatar_id>", "standing in front of Capitol backdrop — election night and major votes"),
+        ],
+        voice_id="82aa66b207d641bdbfacca4174cfa326",
+        desk="entertainment",
+        bio="Chief Entertainment Correspondent. Sharp and precise. Covers entertainment, celebrity, and lifestyle stories.",
+        voice_emotion="Friendly",
+        talking_style="expressive",
+        expression="happy",
+    ),    
+    Anchor(
+        name="Monica Hayes", # Saskia
+        avatars=[
+            AvatarLook("Saskia_public_1", "Blue Blazer, Morning news, entertainment and lifestyle stories"),   # HeyGen: "Saskia in Blue blazer"
+            AvatarLook("Saskia_public_3", "Gray Vest, Morning news, entertainment and lifestyle stories"),    # HeyGen: "Saskia in Grey vest"
+            AvatarLook("Saskia_public_4", "Green Blazer, Morning news, entertainment and lifestyle stories"), # HeyGen: "Saskia in Green blazer"
+             
+            # AvatarLook("<avatar_id>", "standing in front of Capitol backdrop — election night and major votes"),
+        ],
+        voice_id="a4a6df6d4fc248829f72edde5529defa",
+        desk="entertainment",
+        bio="Chief Political Correspondent. Sharp and precise. Covers the White House, Congress, and elections.",
+        voice_emotion="Friendly",
+        talking_style="expressive",
+        expression="happy",
+    ),    
+    Anchor(
+        name="Valerie Brooks", # Candace
+        avatars=[
+            AvatarLook("Candace_Beige_Dress_Front", "Beige Dress, Morning news, entertainment and lifestyle stories"),  # HeyGen: "Candace in Beige Dress (Front)"
+            AvatarLook("Candace_Pink_Blazer_Front", "Pink Blazer, Morning news, entertainment and lifestyle stories"),  # HeyGen: "Candace in Pink Blazer (Front)"
+             
+            # AvatarLook("<avatar_id>", "standing in front of Capitol backdrop — election night and major votes"),
+        ],
+        voice_id="c7c398ea067c4f43a9d2e15dd7c59cf4",
+        desk="entertainment",
+        bio="Chief Entertainment Correspondent. Sharp and precise. Covers entertainment, celebrity, and lifestyle stories.",
+        voice_emotion="Friendly",
+        talking_style="expressive",
+        expression="happy",
+    ),        
+    Anchor(
+        name="Nicholas Stavros",
+        avatars=[
+            AvatarLook("3581241b5df64bd9a331bebda862a637", "Blue Suit, Evening news, entertainment and lifestyle stories"),  # HeyGen: "Kurt" ⚠️ different actor than the on-air name
+
+            # AvatarLook("<avatar_id>", "standing in front of Capitol backdrop — election night and major votes"),
+        ],
+        voice_id="1ed58c9742c64f2aac00b10a4b0c32a9",
+        desk="national",
+        bio="Chief Political Correspondent. Sharp and precise. Covers the White House, Congress, and elections.",
+        voice_emotion="Friendly",
+        talking_style="expressive",
+        expression="happy",
+    ),     
+    Anchor(
+        name="Victor Marinos", # Ricardo
+        avatars=[
+            AvatarLook("fecbc666fa2d4c4ba1c3d0b85cb4c6e5", "Black Suit, Morning news, entertainment and lifestyle stories"),  # HeyGen: "Ricardo"
+            AvatarLook("f3de1e1f0d1f48619660b9efe90eddb7", "Black Suit, Morning news, entertainment and lifestyle stories"),  # HeyGen: "Ricardo"
+            AvatarLook("5154fcc7f8c045e386676d834d7f4b2e", "Blue suit, Morning news, entertainment and lifestyle stories"),   # HeyGen: "Ricardo"
+
+            # AvatarLook("<avatar_id>", "standing in front of Capitol backdrop — election night and major votes"),
+        ],
+        voice_id="e809f6ab08a847acac0d043eddfe0078",
         desk="politics",
         bio="Chief Political Correspondent. Sharp and precise. Covers the White House, Congress, and elections.",
-        voice_emotion="Serious",
+        voice_emotion="Friendly",
+        talking_style="expressive",
+        expression="happy",
+    ),         
+    Anchor(
+        name="Daniel Mercer",
+        avatars=[
+            AvatarLook("cbc2c423747542eda390ffaeb269202c", "formal suit standing in the main studio — hard news, breaking stories"),  # HeyGen: "Daniel Mercer"
+            # AvatarLook("<avatar_id>", "casual blazer, standing — feature stories and human interest"),
+            # AvatarLook("<avatar_id>", "outdoor live shot — field reports and on-location coverage"),
+        ],
+        voice_id="PJXRwHpW7osOhD6GiW1M",
+        desk="politics, national",
+        bio="Lead anchor. Authoritative and composed. Delivers hard news with calm gravitas.",
+        voice_emotion="Broadcaster",
         talking_style="stable",
-    ),
+    ),    
     Anchor(
         name="Karoline Faye",
         avatars=[
-            AvatarLook("f48550dcc6f648adacc6593f1d315234", "casual studio look, sitting — entertainment, celebrity, culture"),
-            AvatarLook("ee21a3956e23413d8ac349901f8184d9", "casual look, standing — entertainment, celebrity, culture"),
+            AvatarLook("f48550dcc6f648adacc6593f1d315234", "casual studio look, sitting — entertainment, celebrity, culture"),  # HeyGen: "Brooklyn"
+            AvatarLook("ee21a3956e23413d8ac349901f8184d9", "casual look, standing — entertainment, celebrity, culture"),         # HeyGen: "Brooklyn"
         ],
         voice_id="5eb15f7ed1254e658faccf14e67f2cd9",
         desk="entertainment",
@@ -102,24 +195,9 @@ ANCHORS: list[Anchor] = [
         expression="happy",
     ),
     Anchor(
-        name="Shawn Green",
-        avatars=[
-            AvatarLook("Shawn_Suit_Front_public", "formal suit, neutral backdrop, Standing — international affairs and geopolitics"),
-            AvatarLook("Shawn_Sitting_Front_public", "formal suit, neutral backdrop, Sitting — international affairs and geopolitics"),
-            AvatarLook("Shawn_Casual_Sitting_Front_public", "casual, neutral backdrop, Sitting — international affairs and geopolitics"),
-            # AvatarLook("<avatar_id>", "field jacket, outdoor — war zone and conflict reporting"),
-            # AvatarLook("<avatar_id>", "business casual — diplomatic and economic foreign stories"),
-        ],
-        voice_id="e1a429dbe823406dbae5fa7c3612314d",
-        desk="foreign",
-        bio="Chief Foreign Correspondent. Measured and globally-informed. Covers international affairs and geopolitics.",
-        voice_emotion="Broadcaster",
-        talking_style="stable",
-    ),
-    Anchor(
         name="Brandon Jones",
         avatars=[
-            AvatarLook("Brandon_expressive2_public", "business suit, expressive — markets, earnings, economic news"),
+            AvatarLook("Brandon_expressive2_public", "business suit, expressive — markets, earnings, economic news"),  # HeyGen: "Brandon in Grey Suit"
             # AvatarLook("<avatar_id>", "casual blazer — startup and tech business stories"),
         ],
         voice_id="3787b4ab93174952a3ad649209f1029a",
@@ -131,7 +209,7 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Alister Blackwood",
         avatars=[
-            AvatarLook("Dexter_Suit_Front_public", "dark formal suit, serious — investigative and accountability journalism"),
+            AvatarLook("Dexter_Suit_Front_public", "dark formal suit, serious — investigative and accountability journalism"),  # HeyGen: "Dexter Suit Front"
             # AvatarLook("<avatar_id>", "casual, no tie — long-form documentary style"),
         ],
         voice_id="088da045d8114ca39add4a75df8ed9a0",
@@ -143,7 +221,7 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Darlene Smith",
         avatars=[
-            AvatarLook("cae4682f73324118b402da17dcbb1b68", "clean studio look — health, medicine, and science reporting"),
+            AvatarLook("cae4682f73324118b402da17dcbb1b68", "clean studio look — health, medicine, and science reporting"),  # HeyGen: "Crystal Veil"
             # AvatarLook("<avatar_id>", "lab or clinical backdrop — medical research and public health"),
         ],
         voice_id="d6a657274b184772ac28a6146f729d3a",

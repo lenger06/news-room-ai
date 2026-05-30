@@ -114,6 +114,14 @@ class AgentRegistry:
             module_path="agents.publisher.agent",
             parent_agent="executive_producer",
         ))
+        self.register_agent(AgentInfo(
+            name="breaking_news_checker",
+            display_name="Breaking News Checker",
+            description="Monitors current headlines and triggers emergency productions for qualifying breaking news",
+            version="1.0.0",
+            module_path="agents.breaking_news_checker.agent",
+            parent_agent=None,
+        ))
 
     def register_agent(self, agent_info: AgentInfo):
         self._agents[agent_info.name] = agent_info

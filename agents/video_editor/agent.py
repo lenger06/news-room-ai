@@ -7,14 +7,16 @@ if str(project_root) not in sys.path:
 
 import json
 import logging
+import re
 from langchain.agents import create_openai_functions_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_openai import ChatOpenAI
 from agents.registry import BaseAgent, AgentInfo
 from agents.video_editor.prompts import VIDEO_EDITOR_PROMPT
-from tools.video_tools import download_video, extract_graphic_cues, save_video_package, assemble_final_video
+from tools.video_tools import download_video, extract_graphic_cues, save_video_package, assemble_final_video, compose_foreground_layers
 from tools.file_operations_tool import file_operations_tool
 from config.settings import settings
+from config.overlays import get_foreground_layers
 
 logger = logging.getLogger(__name__)
 
@@ -50,23 +52,40 @@ class Agent(BaseAgent):
             result = self.executor.invoke({"input": message, "chat_history": []})
             response_text = result.get("output", "")
 
-            # After the LLM has downloaded the broadcast and saved video_package.json,
-            # prepend the promo intro unconditionally (if the promo file exists).
             pkg_path = Path(settings.MEDIA_DIR) / "video_package.json"
             if pkg_path.exists():
                 try:
                     pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
                     broadcast_path = Path(pkg.get("video_file", ""))
+
                     if broadcast_path.exists():
+                        # Step 1: Apply foreground layers (in front of avatar) if any
+                        desk_slug = ""
+                        m = re.search(r'DESK_SLUG[:\s]+([^\n]+)', message, re.IGNORECASE)
+                        if m:
+                            desk_slug = m.group(1).strip()
+
+                        fg_layers = get_foreground_layers(desk_slug)
+                        if fg_layers:
+                            fg_path = compose_foreground_layers(broadcast_path, fg_layers)
+                            if fg_path:
+                                broadcast_path = fg_path
+                                pkg["video_file"] = str(fg_path)
+                                pkg["foreground_layers_applied"] = True
+                                logger.info(f"[video_editor] Foreground layers applied → {fg_path.name}")
+                                response_text += f"\nForeground layers applied → {fg_path.name}"
+
+                        # Step 2: Assemble with promo/outro
                         final_path = assemble_final_video(broadcast_path)
                         if final_path:
                             pkg["video_file"] = str(final_path)
                             pkg["promo_prepended"] = True
-                            pkg_path.write_text(json.dumps(pkg, indent=2), encoding="utf-8")
                             logger.info(f"[video_editor] video_package.json updated → {final_path.name}")
                             response_text += f"\nFinal video assembled → {final_path.name}"
+
+                        pkg_path.write_text(json.dumps(pkg, indent=2), encoding="utf-8")
                 except Exception as e:
-                    logger.warning(f"[video_editor] Promo prepend post-step failed: {e}")
+                    logger.warning(f"[video_editor] Post-processing failed: {e}")
 
             return {"success": True, "response": response_text, "agent": "video_editor"}
         except Exception as e:
