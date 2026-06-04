@@ -1,6 +1,7 @@
 from langchain.tools import tool
 from typing import Optional
 import logging
+import re as _re
 import requests
 import time
 import hashlib
@@ -10,6 +11,44 @@ from pathlib import Path
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# ── TTS text normalisation ─────────────────────────────────────────────────────
+# Applied to all script text before submission to HeyGen.
+# Add entries here whenever the anchor mispronounces something.
+
+_TTS_REPLACEMENTS: list[tuple] = [
+    # Dotted abbreviations — remove dots so TTS reads letters, not "dot"
+    (_re.compile(r'\bU\.S\.A\.'), "U S A"),
+    (_re.compile(r'\bU\.S\.'),    "U S"),
+    (_re.compile(r'\bD\.C\.'),    "D C"),
+    (_re.compile(r'\bN\.Y\.'),    "N Y"),
+    (_re.compile(r'\bL\.A\.'),    "L A"),
+    (_re.compile(r'\bD\.O\.J\.'), "D O J"),
+    (_re.compile(r'\bF\.B\.I\.'), "F B I"),
+    (_re.compile(r'\bC\.I\.A\.'), "C I A"),
+    # Common written abbreviations that TTS stumbles on
+    (_re.compile(r'\bvs\.'),      "versus"),
+    (_re.compile(r'\betc\.'),     "etcetera"),
+    (_re.compile(r'\bSt\.\s'),    "Saint "),
+    (_re.compile(r'\bDr\.'),      "Doctor"),
+    (_re.compile(r'\bMr\.'),      "Mister"),
+    (_re.compile(r'\bMrs\.'),     "Missus"),
+    (_re.compile(r'\bMs\.'),      "Miz"),
+    (_re.compile(r'\bProf\.'),    "Professor"),
+    (_re.compile(r'\bSen\.'),     "Senator"),
+    (_re.compile(r'\bRep\.'),     "Representative"),
+    (_re.compile(r'\bGov\.'),     "Governor"),
+    (_re.compile(r'\bGen\.'),     "General"),
+    # Em-dash — replace with comma-pause so TTS doesn't vocalise it
+    (_re.compile(r'\s*—\s*'),     ", "),
+]
+
+
+def _normalize_tts(text: str) -> str:
+    """Apply pronunciation fixes to script text before sending to HeyGen."""
+    for pattern, replacement in _TTS_REPLACEMENTS:
+        text = pattern.sub(replacement, text)
+    return text
 
 HEYGEN_BASE_URL = "https://api.heygen.com"
 
@@ -370,8 +409,8 @@ def generate_anchor_video(
     if not settings.HEYGEN_API_KEY:
         return json.dumps({"error": "HEYGEN_API_KEY not configured", "video_id": None})
 
-    # Truncate to HeyGen's 5000 char limit
-    script = script[:5000]
+    # Normalise pronunciation then truncate to HeyGen's 5000 char limit
+    script = _normalize_tts(script)[:5000]
 
     avatar = avatar_id or settings.HEYGEN_AVATAR_ID
     voice = voice_id or settings.HEYGEN_VOICE_ID
@@ -747,6 +786,10 @@ def create_broll_video_asset(
     return None, None, False
 
 
+_AVATAR_OFFSET_X: dict[str, float] = {"left": -0.35, "center": 0.0, "right": 0.35}
+_PIP_FROM_AVATAR:  dict[str, str]   = {"left": "right", "center": "left", "right": "left"}
+
+
 def generate_video_multiscene(
     segments: list,
     avatar_id: str,
@@ -756,7 +799,7 @@ def generate_video_multiscene(
     voice_emotion: str = "",
     talking_style: str = "",
     expression: str = "",
-    pip_position: str = "left",
+    avatar_position: str = "center",
     bg_bytes_override: bytes | None = None,
 ) -> dict:
     """
@@ -779,6 +822,10 @@ def generate_video_multiscene(
 
     if not settings.HEYGEN_API_KEY:
         return {"error": "HEYGEN_API_KEY not configured", "video_id": None}
+
+    pip_position = _PIP_FROM_AVATAR.get(avatar_position, "left")
+    offset_x     = _AVATAR_OFFSET_X.get(avatar_position, 0.0)
+    logger.info(f"[heygen] Avatar position={avatar_position!r}  offset_x={offset_x}  pip={pip_position!r}")
 
     # Load studio background frame once (image composite fallback)
     bg_frame = _load_bg_frame()
@@ -840,6 +887,7 @@ def generate_video_multiscene(
             "avatar_id": avatar_id,
             "avatar_style": "normal",
             "matting": True,
+            "offset": {"x": offset_x, "y": 0.0},
         }
         if talking_style:
             character["talking_style"] = talking_style
@@ -848,7 +896,7 @@ def generate_video_multiscene(
 
         voice_obj = {
             "type": "text",
-            "input_text": script[:5000],
+            "input_text": _normalize_tts(script)[:5000],
             "voice_id": voice_id,
         }
         if voice_emotion:

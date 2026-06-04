@@ -161,7 +161,14 @@ Get IDs by calling with your HeyGen API key:
 The orchestrator. Receives every production request, determines the appropriate workflow, auto-detects the active show, selects and rotates anchors per show schedule, and delegates to the team in sequence. Aborts the pipeline early if the Researcher returns no usable content (Tavily unavailable or rate-limited) rather than producing and publishing an empty broadcast. Saves a full production log to `./output/{show_slug}/{run_id}/production_logs/` at the end of every run.
 
 ### Breaking News Checker
-A background monitor (runs via Jarvis scheduler) that checks for significant breaking news every few minutes. Uses an LLM to evaluate whether current events meet broadcast-worthy criteria — major political events, natural disasters, crashes, explosions, corporate collapses, and more. When a qualifying story is detected, it triggers an immediate Breaking News production and suppresses re-alerts for the same story for 2 hours. Criteria are defined in `agents/breaking_news_checker/prompts.py`.
+A background monitor (runs via Jarvis scheduler) that checks for significant breaking news every 30 minutes. Uses an LLM to evaluate whether current events meet broadcast-worthy criteria — major political events, natural disasters, crashes, explosions, corporate collapses, and more. When a qualifying story is detected, it triggers an immediate Breaking News production.
+
+Deduplication and rate-limiting:
+- **24-hour dedup window** — all breaking news covered in the last 24 hours is passed to the LLM as context; ongoing conflicts and developing stories stay visible for a full day
+- **60-minute cooldown** — minimum gap between any two productions regardless of topic
+- **Ongoing conflict rule** — if a story shares 2+ keywords with a recent log entry, the LLM requires a dramatic, unambiguous escalation (war declared, head of state killed, ceasefire signed) before qualifying a new production; routine updates and slight headline variations are suppressed
+
+Criteria are defined in `agents/breaking_news_checker/prompts.py`. The coverage log is persisted to `./output/breaking_news_log.json`.
 
 ### Researcher
 Gathers source material using real-time web search (Tavily). Searches for multiple angles — latest developments, background context, key figures, and statistics. Compiles a sourced research brief with URLs. Also sources b-roll media: still images via Tavily and short video clips via the Pixabay API (if configured). Outputs a `## SOURCED B-ROLL IMAGES` and `## SOURCED B-ROLL VIDEOS` section for the script writer to choose from.
@@ -186,7 +193,7 @@ Receives the draft article and the Fact Check Report. Applies every correction l
 Converts the editor-reviewed article into a spoken broadcast anchor script. Formats it for on-air delivery: natural spoken English, breath-pause markers, and `[GRAPHIC: ...]` cues for supporting visuals. Places `[BROLL: url | description]` markers for still images and `[BROLL: url | description | video]` markers for video clips — B-roll markers must appear at the very start of each new story segment so the visual switches the instant the topic changes. Uses the selected anchor's name in the sign-off. Target read time scales with the requested duration. Saves to `./output/{show_slug}/{run_id}/scripts/`.
 
 ### Anchor
-Takes the broadcast script, strips formatting markers with a pure-regex cleaner (no LLM pass — prevents refusal text from being read aloud), and submits it to HeyGen using the selected anchor's avatar and voice IDs. For scenes with `[BROLL:]` markers, b-roll media (still images **or** video clips) is composited as a Picture-in-Picture in the upper-left corner of the studio background video using FFmpeg, uploaded as a new HeyGen video asset, and used as the scene background. The PIP preserves the original aspect ratio of the source media. Video clip b-roll loops seamlessly for the duration of the scene. Falls back to a Pillow static image composite if FFmpeg is unavailable (images only). Polls for completion natively in Python (every 30 seconds, up to 10 minutes) — does not rely on the LLM to manage polling. Returns the video URL and thumbnail URL when complete.
+Takes the broadcast script, applies TTS text normalisation (see below), strips formatting markers with a pure-regex cleaner (no LLM pass — prevents refusal text from being read aloud), and submits it to HeyGen using the selected anchor's avatar and voice IDs. For scenes with `[BROLL:]` markers, b-roll media (still images **or** video clips) is composited as a Picture-in-Picture in the upper-left corner of the studio background video using FFmpeg, uploaded as a new HeyGen video asset, and used as the scene background. The PIP preserves the original aspect ratio of the source media. Video clip b-roll loops seamlessly for the duration of the scene. Falls back to a Pillow static image composite if FFmpeg is unavailable (images only). Polls for completion natively in Python (every 30 seconds, up to 10 minutes) — does not rely on the LLM to manage polling. Returns the video URL and thumbnail URL when complete.
 
 ### Video Editor
 Downloads the completed anchor video from HeyGen, extracts all `[GRAPHIC: ...]` cues from the script, and assembles a `video_package.json` in `./output/{show_slug}/{run_id}/media/` containing the video file path, thumbnail URL, graphic cues, and suggested YouTube metadata.
@@ -196,6 +203,22 @@ Confirms all output files are saved and compiles a final production summary — 
 
 ### Publisher
 Reads `video_package.json`, uploads the finished MP4 to YouTube with branded title ("Defy Logic News | Morning Report | ...") and description, and sets the HeyGen thumbnail. Uploads exactly once in native Python. Returns the final YouTube URL.
+
+---
+
+## TTS Text Normalisation
+
+All anchor script text is normalised before submission to HeyGen via `_normalize_tts()` in `tools/heygen_tool.py`. Prevents common anchor mispronunciations:
+
+- `U.S.` → `U S`, `U.S.A.` → `U S A`, `D.C.` → `D C`, `F.B.I.` → `F B I`, `C.I.A.` → `C I A`
+- `vs.` → `versus`, `etc.` → `etcetera`
+- `Dr.` → `Doctor`, `Mr.` → `Mister`, `Mrs.` → `Missus`, `Sen.` → `Senator`, `Gov.` → `Governor`, `Gen.` → `General`, `Rep.` → `Representative`
+- Em-dash `—` → `, ` (prevents "dash" being read aloud)
+
+To add a new rule, append a tuple to `_TTS_REPLACEMENTS` at the top of `tools/heygen_tool.py`:
+```python
+(_re.compile(r'\bNATO\b'), "NAY-toh"),
+```
 
 ---
 

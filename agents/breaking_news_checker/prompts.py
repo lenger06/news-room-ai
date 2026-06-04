@@ -48,12 +48,33 @@ BREAKING_NEWS_EVAL_PROMPT = """Current date/time: {current_datetime}
 ## Top current headlines
 {headlines}
 
-## Breaking news already covered in the last 6 hours
+## Breaking news already covered in the last 24 hours
 {recent_log}
 
 Evaluate the headlines. Does any story meet the breaking news threshold AND represent either:
 (a) a story not yet covered in the recent log, or
-(b) a significant new development on a previously covered story?
+(b) a dramatic, unambiguous escalation on a previously covered story?
+
+CRITICAL — Ongoing conflict rule:
+If a story shares two or more keywords with ANY entry in the recent log, it must represent a
+definitive, game-changing escalation to qualify — not just a new development or updated headline.
+
+Examples of what does NOT qualify for an already-logged conflict:
+- Additional strikes / attacks in the same region
+- Rising death toll updates
+- Slightly different headline wording for the same underlying event
+- New countries "joining" a conflict that is already being covered
+- Ceasefire talks beginning or stalling
+
+Examples of what DOES qualify even for an already-logged conflict:
+- War formally declared between major states
+- Nuclear weapon used or credibly threatened
+- Head of state killed, captured, or removed from power as a direct result
+- US forces suffer mass casualties (50+) in a single engagement
+- Conflict physically expands to a NATO member triggering Article 5
+
+When the same topic appears more than twice in the 24-hour log, assume it is a developing
+ongoing story and require the highest possible bar before triggering another production.
 
 Respond with ONLY a valid JSON object — no markdown fences, no explanation outside the JSON:
 {{
@@ -68,9 +89,9 @@ Respond with ONLY a valid JSON object — no markdown fences, no explanation out
 }}
 
 Confidence levels:
-- "high"   — story clearly meets one of the auto-qualify criteria; no ambiguity (plane crash with casualties, circuit breaker triggered, head-of-state health crisis, etc.)
-- "medium" — borderline case requiring judgment; story is significant but does not cleanly match a listed criterion (major arrest of a senior official, landmark court ruling, large-scale infrastructure attack)
-- "low"    — story is newsworthy but does not meet the breaking news threshold, OR you are uncertain enough that conservative judgment says skip
+- "high"   — story clearly meets one of the auto-qualify criteria; no ambiguity
+- "medium" — borderline case; story is significant but does not cleanly match a listed criterion
+- "low"    — story is newsworthy but does not meet the threshold, OR you are uncertain — skip
 
 For production_message use this format when breaking news is found:
 "BREAKING: [story description]. Cover this story immediately as breaking news — lead with the breaking development, do not recap previously covered stories."

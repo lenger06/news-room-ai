@@ -106,7 +106,7 @@ class Agent(BaseAgent):
 
     def _format_recent_log(self, entries: list[dict]) -> str:
         if not entries:
-            return "None — no breaking news covered in the last 6 hours."
+            return "None — no breaking news covered in the last 24 hours."
         lines = []
         for e in entries:
             ts = e.get("ts", "")[:16].replace("T", " ")

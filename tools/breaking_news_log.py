@@ -11,9 +11,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _LOG_PATH = Path("./output/breaking_news_log.json")
-_MAX_ENTRIES = 50
-_DEDUP_WINDOW_HOURS = 6.0
-_COOLDOWN_MINUTES = 30
+_MAX_ENTRIES = 100
+_DEDUP_WINDOW_HOURS = 24.0   # was 6 — ongoing conflicts must stay visible for a full day
+_COOLDOWN_MINUTES = 60       # was 30 — minimum gap between any two breaking news productions
 
 
 def _load() -> list[dict]:
