@@ -194,6 +194,34 @@ class Agent(BaseAgent):
                 "confidence": "low",
             }
 
+        # Code-level same-story suppression — LLM dedup is unreliable for repeat fires.
+        # Tiered gap: 3h required after 2+ fires, 6h after 4+ fires in the last 24h.
+        from tools.breaking_news_log import same_story_fire_count, same_story_last_fired_seconds
+        count_24h = same_story_fire_count(keywords, since_hours=24.0)
+        last_fired_secs = same_story_last_fired_seconds(keywords)
+        if count_24h >= 4:
+            required_gap_secs = 6 * 3600
+        elif count_24h >= 2:
+            required_gap_secs = 3 * 3600
+        else:
+            required_gap_secs = 0
+
+        if required_gap_secs and last_fired_secs < required_gap_secs:
+            logger.info(
+                f"[breaking_news] Same-story suppression: '{topic}' fired {count_24h}x in 24h, "
+                f"last {last_fired_secs/3600:.1f}h ago (need {required_gap_secs/3600:.0f}h gap) — suppressed"
+            )
+            return {
+                "success": True,
+                "response": (
+                    f"Same-story suppression: '{topic}' has been covered {count_24h}x in the last 24h "
+                    f"and last aired {last_fired_secs/60:.0f} minutes ago. "
+                    f"Required gap: {required_gap_secs//3600}h."
+                ),
+                "agent": "breaking_news_checker",
+                "breaking_news_found": False,
+            }
+
         # Determine anchor team: last show's crew if aired recently, else dedicated BN team
         show_slug = self._determine_show_slug()
 

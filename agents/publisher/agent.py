@@ -175,15 +175,16 @@ class Agent(BaseAgent):
             if "error" in metadata:
                 return {"success": False, "response": f"Publisher failed to read package: {metadata['error']}", "agent": "publisher"}
 
-            # Rebuild title: "Defy Logic News | Show Name | Story Title"
+            # Title = story subject only — strip any newsroom name or show-type prefix
             raw = metadata.get("title", "News Video")
             newsroom = settings.NEWSROOM_NAME
-            bare = raw[len(newsroom):].lstrip(" |").strip() if raw.startswith(newsroom) else raw
-            parts = [newsroom]
-            if show_name:
-                parts.append(show_name)
-            parts.append(bare)
-            metadata["title"] = " | ".join(parts)
+            bare = raw[len(newsroom):].lstrip(" |:—-").strip() if raw.startswith(newsroom) else raw
+            bare = re.sub(
+                r'^(?:Breaking News|Special Report|Morning Report|Evening News|'
+                r'Weekend Roundup|Entertainment Weekly)\s*[:|—\-]\s*',
+                '', bare, flags=re.IGNORECASE,
+            ).strip()
+            metadata["title"] = bare or "News Video"
 
             video_file = metadata.get("video_file", "")
             title = metadata.get("title", "Defy Logic News Video")

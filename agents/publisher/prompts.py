@@ -10,7 +10,7 @@ Steps:
 2. Return the metadata as a JSON object with these exact keys:
    video_file, title, description, tags, privacy_status, thumbnail_url
 
-   - title: prepend "{_n} | " to the title from the package
+   - title: use the title from the package as-is — do not add any newsroom name, show name, or "Breaking News" / "Special Report" prefix
    - description: append "\\n\\n{_n}" to the description from the package
    - privacy_status: always "unlisted"
    - tags: list from the package

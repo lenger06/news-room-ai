@@ -40,11 +40,11 @@ class ProductionState(TypedDict):
     desk_name: str
     desk_prompt_style: str
     desk_background_asset_id: str
-    desk_pip_position: str
 
     # Selected anchor for this production
     anchor_name: str
     anchor_avatar_id: str
+    anchor_avatar_position: str     # "left" | "center" | "right"
     anchor_voice_id: str
     anchor_voice_emotion: str
     anchor_talking_style: str
@@ -182,27 +182,52 @@ class Agent(BaseAgent):
                 state["desk_name"] = desk.name if desk else "National Desk"
                 state["desk_prompt_style"] = desk.prompt_style if desk else ""
                 state["desk_background_asset_id"] = desk.background_asset_id if desk else "f6fa4085043140deaba8258a96233036"
-                state["desk_pip_position"] = desk.pip_position if desk else "left"
 
-                # Select anchor deterministically from show schedule (with stand-in rotation)
-                assignment = show.anchor_for_desk(state["desk"])
-                if assignment:
-                    anchor_name = get_show_anchor_name(show.slug, assignment)
-                    anchor = get_anchor(name=anchor_name)
-                    avatar_id = get_next_look(anchor, assignment.look_preference, state["desk"])
-                else:
-                    anchor = get_anchor(desk=state["desk"])
-                    avatar_id = get_next_look(anchor, desk=state["desk"])
+                # Force special-report show for SPECIAL_REPORT workflow
+                if workflow == "SPECIAL_REPORT" and show_slug != "special-report":
+                    from config.shows import get_show as _get_show
+                    _sr = _get_show("special-report")
+                    if _sr:
+                        show = _sr
+                        show_slug = "special-report"
+                        state["show_slug"] = show_slug
+                        state["show_name"] = show.name
+                        state["show_tone"] = show.tone
+                        logger.info("[EP] SPECIAL_REPORT — overriding show to special-report")
+
+                # Honour explicit anchor request; otherwise use show schedule
+                anchor_override_name = parsed.get("anchor_override") or ""
+                if anchor_override_name:
+                    anchor = get_anchor(name=anchor_override_name)
+                    if anchor:
+                        logger.info(f"[EP] Anchor override: {anchor.name}")
+                        avatar_id, avatar_position = get_next_look(anchor, desk=state["desk"])
+                    else:
+                        logger.warning(f"[EP] Anchor override '{anchor_override_name}' not found — falling back to schedule")
+                        anchor_override_name = ""
+
+                if not anchor_override_name:
+                    # Select anchor deterministically from show schedule (with stand-in rotation)
+                    assignment = show.anchor_for_desk(state["desk"])
+                    if assignment:
+                        anchor_name = get_show_anchor_name(show.slug, assignment)
+                        anchor = get_anchor(name=anchor_name)
+                        avatar_id, avatar_position = get_next_look(anchor, assignment.look_preference, state["desk"])
+                    else:
+                        anchor = get_anchor(desk=state["desk"])
+                        avatar_id, avatar_position = get_next_look(anchor, desk=state["desk"])
 
                 state["anchor_name"] = anchor.name
                 state["anchor_avatar_id"] = avatar_id
+                state["anchor_avatar_position"] = avatar_position
                 state["anchor_voice_id"] = anchor.voice_id
                 state["anchor_voice_emotion"] = anchor.voice_emotion or ""
                 state["anchor_talking_style"] = anchor.talking_style or ""
                 state["anchor_expression"] = anchor.expression or ""
                 state["extra_playlist_keys"] = parsed.get("extra_playlists") or []
                 state["playlist_ids"] = resolve_playlist_ids(
-                    state["desk"], anchor.name, workflow, state["topic"]
+                    state["desk"], anchor.name, workflow, state["topic"],
+                    show_slug=state["show_slug"],
                 )
                 raw_dur = parsed.get("target_duration_seconds")
                 if raw_dur:
@@ -228,24 +253,26 @@ class Agent(BaseAgent):
                 state["desk_name"] = "National Desk"
                 state["desk_prompt_style"] = ""
                 state["desk_background_asset_id"] = show.background_asset_id or "f6fa4085043140deaba8258a96233036"
-                state["desk_pip_position"] = "left"
                 assignment = show.anchor_for_desk("national")
                 if assignment:
                     anchor_name = get_show_anchor_name(show.slug, assignment)
                     anchor = get_anchor(name=anchor_name)
-                    avatar_id = get_next_look(anchor, assignment.look_preference, "national")
+                    avatar_id, avatar_position = get_next_look(anchor, assignment.look_preference, "national")
                 else:
                     anchor = get_anchor()
                     avatar_id = anchor.default_avatar_id
+                    avatar_position = anchor.avatars[0].avatar_position if anchor.avatars else "center"
                 state["anchor_name"] = anchor.name
                 state["anchor_avatar_id"] = avatar_id
+                state["anchor_avatar_position"] = avatar_position
                 state["anchor_voice_id"] = anchor.voice_id
                 state["anchor_voice_emotion"] = anchor.voice_emotion or ""
                 state["anchor_talking_style"] = anchor.talking_style or ""
                 state["anchor_expression"] = anchor.expression or ""
                 state["extra_playlist_keys"] = []
                 state["playlist_ids"] = resolve_playlist_ids(
-                    "national", anchor.name, "ARTICLE", state["topic"]
+                    "national", anchor.name, "ARTICLE", state["topic"],
+                    show_slug=state.get("show_slug", ""),
                 )
         except Exception as e:
             logger.error(f"[EP] Analysis error: {e}", exc_info=True)
@@ -256,10 +283,10 @@ class Agent(BaseAgent):
             state["desk_name"] = "National Desk"
             state["desk_prompt_style"] = ""
             state["desk_background_asset_id"] = "f6fa4085043140deaba8258a96233036"
-            state["desk_pip_position"] = "left"
             anchor = get_anchor()
             state["anchor_name"] = anchor.name
             state["anchor_avatar_id"] = anchor.default_avatar_id
+            state["anchor_avatar_position"] = anchor.avatars[0].avatar_position if anchor.avatars else "center"
             state["anchor_voice_id"] = anchor.voice_id
             state["anchor_voice_emotion"] = anchor.voice_emotion or ""
             state["anchor_talking_style"] = anchor.talking_style or ""
@@ -394,16 +421,16 @@ class Agent(BaseAgent):
                     step_input += f"\nSAVE_DIR: {output_dir}/scripts"
             elif agent_name == "anchor" and anchor_avatar_id:
                 background_asset_id = state.get("desk_background_asset_id", "")
-                pip_position = state.get("desk_pip_position", "left")
+                avatar_position = state.get("anchor_avatar_position", "center")
                 step_input += (
                     f"\n\nANCHOR NAME: {anchor_name}\n"
                     f"AVATAR ID: {anchor_avatar_id}\n"
+                    f"AVATAR POSITION: {avatar_position}\n"
                     f"VOICE ID: {anchor_voice_id}\n"
                     f"VOICE EMOTION: {state.get('anchor_voice_emotion', '')}\n"
                     f"TALKING STYLE: {state.get('anchor_talking_style', '')}\n"
                     f"EXPRESSION: {state.get('anchor_expression', '')}\n"
                     f"BACKGROUND ASSET ID: {background_asset_id}\n"
-                    f"PIP POSITION: {pip_position}\n"
                     f"DESK_SLUG: {state.get('desk', '')}\n"
                     f"TOPIC: {state.get('topic', '')}\n"
                 )
@@ -418,6 +445,7 @@ class Agent(BaseAgent):
                     state.get("anchor_name", ""),
                     state.get("workflow", ""),
                     state.get("topic", ""),
+                    show_slug=state.get("show_slug", ""),
                 )
                 extra_ids = get_ids_by_keys(state.get("extra_playlist_keys", []))
                 # Merge, deduplicate, preserve order
@@ -606,9 +634,9 @@ class Agent(BaseAgent):
                 "desk_name": "",
                 "desk_prompt_style": "",
                 "desk_background_asset_id": "",
-                "desk_pip_position": "left",
                 "anchor_name": "",
                 "anchor_avatar_id": "",
+                "anchor_avatar_position": "center",
                 "anchor_voice_id": "",
                 "anchor_voice_emotion": "",
                 "anchor_talking_style": "",

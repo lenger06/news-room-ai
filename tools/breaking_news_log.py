@@ -45,6 +45,32 @@ def within_cooldown() -> bool:
     return any(e.get("ts_unix", 0) >= cutoff for e in _load())
 
 
+def same_story_fire_count(keywords: list[str], since_hours: float = 24.0) -> int:
+    """Count log entries in the last since_hours that share 2+ keywords with the given list."""
+    cutoff = datetime.now(timezone.utc).timestamp() - (since_hours * 3600)
+    kw_set = {k.lower() for k in keywords}
+    count = 0
+    for e in _load():
+        if e.get("ts_unix", 0) < cutoff:
+            continue
+        e_kw = {k.lower() for k in e.get("keywords", [])}
+        if len(kw_set & e_kw) >= 2:
+            count += 1
+    return count
+
+
+def same_story_last_fired_seconds(keywords: list[str]) -> float:
+    """Return seconds since the most recent log entry sharing 2+ keywords. Returns inf if none."""
+    now = datetime.now(timezone.utc).timestamp()
+    kw_set = {k.lower() for k in keywords}
+    most_recent = 0.0
+    for e in _load():
+        e_kw = {k.lower() for k in e.get("keywords", [])}
+        if len(kw_set & e_kw) >= 2 and e.get("ts_unix", 0) > most_recent:
+            most_recent = e["ts_unix"]
+    return (now - most_recent) if most_recent else float("inf")
+
+
 def record(topic: str, headline: str, keywords: list[str], show_slug: str) -> None:
     """Log a triggered breaking news production to prevent immediate re-fire."""
     entries = _load()

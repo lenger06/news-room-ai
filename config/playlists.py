@@ -54,6 +54,19 @@ ANCHOR_PLAYLISTS: dict[str, Playlist] = {
     "Darlene Smith":    Playlist("Darlene Smith — Health & Science","", ""),
 }
 
+# ── Show Playlists ─────────────────────────────────────────────────────────────
+# Keys match show slugs in config/shows.py.
+# Fill in youtube_playlist_id values after creating them in YouTube Studio.
+
+SHOW_PLAYLISTS: dict[str, Playlist] = {
+    "breaking-news":       Playlist("Breaking News",         "PL-27fCQ8W5Egt-ZDt4tADLfkgZY5q8Syn", "Breaking news alerts"),
+    "special-report":      Playlist("Special Reports",       "", "In-depth special reports"),
+    "morning-report":      Playlist("Morning Report",        "", "Morning broadcast"),
+    "evening-news":        Playlist("Evening News",          "", "Evening broadcast"),
+    "weekend-roundup":     Playlist("Weekend Roundup",       "", "Weekend news roundup"),
+    "entertainment-weekly":Playlist("Entertainment Weekly",  "", "Entertainment news"),
+}
+
 # ── Format Playlists ───────────────────────────────────────────────────────────
 # Keys match workflow names in the Executive Producer.
 # Only video-producing workflows are listed — article-only runs don't get a format playlist.
@@ -83,12 +96,17 @@ def resolve_playlist_ids(
     anchor_name: str,
     workflow: str,
     topic: str,
+    show_slug: str = "",
 ) -> list[str]:
     """
     Return the deduplicated list of YouTube playlist IDs that apply to this
     production. Entries with an empty playlist_id are skipped automatically.
     """
     candidates: list[str] = []
+
+    show_pl = SHOW_PLAYLISTS.get(show_slug)
+    if show_pl and show_pl.youtube_playlist_id:
+        candidates.append(show_pl.youtube_playlist_id)
 
     desk_pl = DESK_PLAYLISTS.get(desk)
     if desk_pl and desk_pl.youtube_playlist_id:
