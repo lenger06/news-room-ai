@@ -167,6 +167,7 @@ Deduplication and rate-limiting:
 - **24-hour dedup window** — all breaking news covered in the last 24 hours is passed to the LLM as context; ongoing conflicts and developing stories stay visible for a full day
 - **60-minute cooldown** — minimum gap between any two productions regardless of topic
 - **Ongoing conflict rule** — if a story shares 2+ keywords with a recent log entry, the LLM requires a dramatic, unambiguous escalation (war declared, head of state killed, ceasefire signed) before qualifying a new production; routine updates and slight headline variations are suppressed
+- **Same-story suppression (code-level)** — even after the LLM approves a story, a tiered per-story cooldown enforces a hard gate based on how many times the same story (2+ keyword overlap) has already fired in the last 24 hours: 3-hour gap after 2+ fires; 6-hour gap after 4+ fires. Prevents a single developing event (earthquake, ongoing conflict) from re-firing every 60 minutes regardless of how the LLM evaluates it
 
 Criteria are defined in `agents/breaking_news_checker/prompts.py`. The coverage log is persisted to `./output/breaking_news_log.json`.
 
@@ -202,7 +203,24 @@ Downloads the completed anchor video from HeyGen, extracts all `[GRAPHIC: ...]` 
 Confirms all output files are saved and compiles a final production summary — article path, script path, video path, topic, and word counts.
 
 ### Publisher
-Reads `video_package.json`, uploads the finished MP4 to YouTube with branded title ("Defy Logic News | Morning Report | ...") and description, and sets the HeyGen thumbnail. Uploads exactly once in native Python. Returns the final YouTube URL.
+Reads `video_package.json` and uploads the finished MP4 to YouTube. The title is the story subject only — newsroom name and show-type prefixes ("Defy Logic News | Morning Report | …", "Breaking News: …", etc.) are stripped, leaving just the headline. Sets the HeyGen thumbnail. Adds the video to the appropriate YouTube playlists (see Playlists below). Uploads exactly once in native Python. Returns the final YouTube URL.
+
+---
+
+## YouTube Playlists
+
+Each uploaded video is automatically added to the relevant YouTube playlists. Assignment is multi-layered:
+
+| Layer | Source | Example |
+|-------|--------|---------|
+| **Show playlist** | Active show slug | Breaking News → Breaking News playlist |
+| **Desk playlist** | Editorial desk | Foreign desk → World News playlist |
+| **Anchor playlist** | On-air anchor | Shawn Green → Shawn Green — World Report |
+| **Series playlists** | Topic keywords | Defined in `config/playlists.py` |
+
+Show playlists are configured in `SHOW_PLAYLISTS` in `config/playlists.py`. The Breaking News playlist ID is pre-configured. Morning Report, Evening News, Special Reports, and Weekend Roundup playlist IDs can be filled in after creating them in YouTube Studio (Content → Playlists → copy the `PLxxxxxx` ID from the URL).
+
+The EP can also assign extra playlists explicitly via `extra_playlists` in its analysis (e.g. adding a story to a series playlist). All playlist IDs are deduplicated before upload.
 
 ---
 
