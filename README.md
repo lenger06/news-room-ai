@@ -164,12 +164,56 @@ The orchestrator. Receives every production request, determines the appropriate 
 A background monitor (runs via Jarvis scheduler) that checks for significant breaking news every 30 minutes. Uses an LLM to evaluate whether current events meet broadcast-worthy criteria — major political events, natural disasters, crashes, explosions, corporate collapses, and more. When a qualifying story is detected, it triggers an immediate Breaking News production.
 
 Deduplication and rate-limiting:
-- **24-hour dedup window** — all breaking news covered in the last 24 hours is passed to the LLM as context; ongoing conflicts and developing stories stay visible for a full day
+- **72-hour dedup window** — all breaking news covered in the last 72 hours is passed to the LLM as context; multi-day developing stories (earthquakes, ongoing conflicts, political crises) stay visible long enough to prevent re-triggering on subsequent days
 - **60-minute cooldown** — minimum gap between any two productions regardless of topic
 - **Ongoing conflict rule** — if a story shares 2+ keywords with a recent log entry, the LLM requires a dramatic, unambiguous escalation (war declared, head of state killed, ceasefire signed) before qualifying a new production; routine updates and slight headline variations are suppressed
-- **Same-story suppression (code-level)** — even after the LLM approves a story, a tiered per-story cooldown enforces a hard gate based on how many times the same story (2+ keyword overlap) has already fired in the last 24 hours: 3-hour gap after 2+ fires; 6-hour gap after 4+ fires. Prevents a single developing event (earthquake, ongoing conflict) from re-firing every 60 minutes regardless of how the LLM evaluates it
+- **Same-story suppression (code-level)** — tiered hard gate based on total coverage count across both breaking news and regular EP productions: 3-hour gap after 1+ fires; 6-hour gap after 2+ fires; 12-hour gap after 4+ fires
+- **Cross-log awareness** — also checks the EP story history (see below) so a story covered in the Morning Report won't re-trigger as breaking news an hour later
 
 Criteria are defined in `agents/breaking_news_checker/prompts.py`. The coverage log is persisted to `./output/breaking_news_log.json`.
+
+### Story Deduplication (EP Dedup Gate)
+
+Before committing to any production pipeline, the Executive Producer runs a **dedup check** against the last 7 days of story history. This prevents the same event from being covered repeatedly when nothing material has changed — which wastes HeyGen credits and fills the channel with duplicate content.
+
+**How it works:**
+
+1. The EP's LLM analysis extracts 4–6 discriminating keywords from the requested topic (proper nouns, place names, key subjects — not generic words like "news" or "update").
+2. The story history is queried for any production in the last 7 days sharing 2+ of those keywords.
+3. If matches are found, a second LLM call evaluates whether the new request represents a genuine new development or a duplicate:
+   - **PROCEED** — new story, not covered before → production continues normally
+   - **PROCEED_AS_UPDATE** — same event but with a significant new development (status change, dramatic escalation, major new revelation) → production continues with an `[UPDATE NOTE]` injected so the Researcher and Writer focus on what's new
+   - **SKIP** — same story, no meaningful change → production is suppressed; no HeyGen credits consumed; clear explanation returned to the caller
+
+**What counts as a significant new development (PROCEED_AS_UPDATE):**
+- Status change: search operation → survivor found; accused → convicted; missing → confirmed dead
+- Dramatic escalation: ceasefire collapses; protest becomes riot; fire spreads to a new area
+- Major new revelation: criminal charges filed, government policy reversal, whistleblower evidence
+
+**What does NOT qualify (SKIP):**
+- Death toll rises from the same incident
+- Officials restate the same position
+- "Rescue efforts continue" / "investigation ongoing" with no new findings
+- Same story reframed with a slightly different headline angle
+
+**Bypassing dedup:**
+
+To override suppression — e.g. when you know there is a genuine update or want to force a new angle — add one of these tags anywhere in the request:
+
+```
+[FORCE]      — bypass dedup entirely, produce unconditionally
+[UPDATE]     — signal this is a known follow-up; proceeds as PROCEED_AS_UPDATE
+[NEW-ANGLE]  — signal this is a distinct angle, not a repeat
+```
+
+Examples:
+```
+[UPDATE] Produce a broadcast video on the Venezuela earthquake — rescue operation has found survivors
+[FORCE] Generate a video on the France flooding situation
+[NEW-ANGLE] Cover the economic impact of the Venezuela earthquake — different story from the rescue coverage
+```
+
+The story history is persisted to `./output/story_history.json`. The dedup gate is bypassed automatically for `RESEARCH_ONLY`, `SCRIPT_ONLY`, and `VIDEO_FROM_SCRIPT` workflows (these don't produce new researched broadcast content).
 
 ### Researcher
 Gathers source material using real-time web search (Tavily). Searches for multiple angles — latest developments, background context, key figures, and statistics. Compiles a sourced research brief with URLs. Also sources b-roll media: still images via Tavily and short video clips via the Pixabay API (if configured). Outputs a `## SOURCED B-ROLL IMAGES` and `## SOURCED B-ROLL VIDEOS` section for the script writer to choose from.
@@ -285,7 +329,9 @@ output/
       scripts/          — broadcast anchor scripts (.md)
       media/            — anchor videos (.mp4) and video_package.json
       production_logs/  — full production logs with all agent outputs (.md)
-  last_broadcast.json   — timestamp of the most recent completed production
+  breaking_news_log.json  — breaking news coverage log (72-hour dedup window)
+  story_history.json      — universal story log for EP dedup (7-day window)
+  last_broadcast.json     — timestamp of the most recent completed production
 ```
 
 ---

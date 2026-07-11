@@ -106,12 +106,12 @@ class Agent(BaseAgent):
 
     def _format_recent_log(self, entries: list[dict]) -> str:
         if not entries:
-            return "None — no breaking news covered in the last 24 hours."
+            return "None — no breaking news covered in the last 72 hours."
         lines = []
         for e in entries:
             ts = e.get("ts", "")[:16].replace("T", " ")
             kw = ", ".join(e.get("keywords", []))
-            lines.append(f"[{ts} UTC] {e.get('headline', '')}  |  keywords: {kw}")
+            lines.append(f"[{ts} UTC] {e.get('headline', e.get('topic', ''))}  |  keywords: {kw}")
         return "\n".join(lines)
 
     async def process_message(self, message: str, context: dict = None) -> dict:
@@ -195,26 +195,39 @@ class Agent(BaseAgent):
             }
 
         # Code-level same-story suppression — LLM dedup is unreliable for repeat fires.
-        # Tiered gap: 3h required after 2+ fires, 6h after 4+ fires in the last 24h.
+        # Tiered gap based on 72-hour fire count (extended from 24h to catch multi-day stories).
         from tools.breaking_news_log import same_story_fire_count, same_story_last_fired_seconds
-        count_24h = same_story_fire_count(keywords, since_hours=24.0)
+        from tools.story_history import find_similar as _sh_find_similar
+        count_72h = same_story_fire_count(keywords, since_hours=72.0)
+
+        # Also count any regular EP productions covering the same topic in the last 7 days
+        ep_similar = _sh_find_similar(keywords, hours=168.0)
+        ep_count = len(ep_similar)
+        if ep_count > 0:
+            logger.info(f"[breaking_news] Story also appears {ep_count}x in regular EP history")
+
+        total_coverage = count_72h + ep_count
         last_fired_secs = same_story_last_fired_seconds(keywords)
-        if count_24h >= 4:
+
+        if total_coverage >= 4:
+            required_gap_secs = 12 * 3600
+        elif total_coverage >= 2:
             required_gap_secs = 6 * 3600
-        elif count_24h >= 2:
+        elif total_coverage >= 1:
             required_gap_secs = 3 * 3600
         else:
             required_gap_secs = 0
 
         if required_gap_secs and last_fired_secs < required_gap_secs:
             logger.info(
-                f"[breaking_news] Same-story suppression: '{topic}' fired {count_24h}x in 24h, "
+                f"[breaking_news] Same-story suppression: '{topic}' covered {total_coverage}x total "
+                f"(breaking={count_72h}, EP={ep_count}), "
                 f"last {last_fired_secs/3600:.1f}h ago (need {required_gap_secs/3600:.0f}h gap) — suppressed"
             )
             return {
                 "success": True,
                 "response": (
-                    f"Same-story suppression: '{topic}' has been covered {count_24h}x in the last 24h "
+                    f"Same-story suppression: '{topic}' has been covered {total_coverage}x recently "
                     f"and last aired {last_fired_secs/60:.0f} minutes ago. "
                     f"Required gap: {required_gap_secs//3600}h."
                 ),

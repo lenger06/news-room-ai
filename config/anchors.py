@@ -13,7 +13,8 @@ import random
 @dataclass
 class AvatarLook:
     avatar_id: str
-    description: str    # e.g. "formal suit at news desk", "casual blazer standing", "outdoor live shot"
+    description: str        # e.g. "formal suit at news desk", "casual blazer standing", "outdoor live shot"
+    avatar_position: str = "center"  # "left" | "center" | "right" — where the avatar sits in frame
 
 
 @dataclass

@@ -48,7 +48,7 @@ BREAKING_NEWS_EVAL_PROMPT = """Current date/time: {current_datetime}
 ## Top current headlines
 {headlines}
 
-## Breaking news already covered in the last 24 hours
+## Breaking news already covered in the last 72 hours
 {recent_log}
 
 Evaluate the headlines. Does any story meet the breaking news threshold AND represent either:

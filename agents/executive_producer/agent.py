@@ -20,7 +20,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from agents.registry import BaseAgent, AgentInfo, agent_registry
-from agents.executive_producer.prompts import EP_SYSTEM_PROMPT, EP_ANALYSIS_PROMPT
+from agents.executive_producer.prompts import EP_SYSTEM_PROMPT, EP_ANALYSIS_PROMPT, STORY_DEDUP_PROMPT
 from config.settings import settings
 from config.anchors import get_anchor, list_anchors
 from config.desks import get_desk, list_desks
@@ -68,6 +68,13 @@ class ProductionState(TypedDict):
 
     # Accumulated outputs keyed by agent name
     outputs: Dict[str, str]
+
+    # Story keywords extracted by LLM analysis (used for dedup matching)
+    keywords: List[str]
+
+    # Dedup gate — set by _dedup_check_node before any pipeline step runs
+    dedup_suppressed: bool
+    dedup_reason: str
 
     # Current step tracking
     current_step_index: int
@@ -117,11 +124,17 @@ class Agent(BaseAgent):
     def _build_workflow(self):
         graph = StateGraph(ProductionState)
         graph.add_node("analyse", self._analyse_node)
+        graph.add_node("dedup_check", self._dedup_check_node)
         graph.add_node("execute_step", self._execute_step_node)
         graph.add_node("summarise", self._summarise_node)
 
         graph.add_edge(START, "analyse")
-        graph.add_edge("analyse", "execute_step")
+        graph.add_edge("analyse", "dedup_check")
+        graph.add_conditional_edges(
+            "dedup_check",
+            lambda s: "suppressed" if s.get("dedup_suppressed") else "proceed",
+            {"suppressed": "summarise", "proceed": "execute_step"},
+        )
         graph.add_conditional_edges(
             "execute_step",
             self._route_after_step,
@@ -224,6 +237,7 @@ class Agent(BaseAgent):
                 state["anchor_voice_emotion"] = anchor.voice_emotion or ""
                 state["anchor_talking_style"] = anchor.talking_style or ""
                 state["anchor_expression"] = anchor.expression or ""
+                state["keywords"] = parsed.get("keywords") or []
                 state["extra_playlist_keys"] = parsed.get("extra_playlists") or []
                 state["playlist_ids"] = resolve_playlist_ids(
                     state["desk"], anchor.name, workflow, state["topic"],
@@ -269,6 +283,7 @@ class Agent(BaseAgent):
                 state["anchor_voice_emotion"] = anchor.voice_emotion or ""
                 state["anchor_talking_style"] = anchor.talking_style or ""
                 state["anchor_expression"] = anchor.expression or ""
+                state["keywords"] = []
                 state["extra_playlist_keys"] = []
                 state["playlist_ids"] = resolve_playlist_ids(
                     "national", anchor.name, "ARTICLE", state["topic"],
@@ -291,9 +306,74 @@ class Agent(BaseAgent):
             state["anchor_voice_emotion"] = anchor.voice_emotion or ""
             state["anchor_talking_style"] = anchor.talking_style or ""
             state["anchor_expression"] = anchor.expression or ""
+            state["keywords"] = []
             state["extra_playlist_keys"] = []
             state["playlist_ids"] = []
             state["error"] = str(e)
+        return state
+
+    async def _dedup_check_node(self, state: ProductionState) -> ProductionState:
+        """Check story history to prevent duplicate coverage before the pipeline starts."""
+        from tools.story_history import find_similar, format_for_llm
+
+        state["dedup_suppressed"] = False
+        state["dedup_reason"] = ""
+
+        workflow = state.get("workflow", "")
+        # Dedup only applies to workflows that produce original researched content
+        if workflow in ("RESEARCH_ONLY", "SCRIPT_ONLY", "VIDEO_FROM_SCRIPT"):
+            return state
+
+        # Allow explicit force/update overrides
+        request_upper = state.get("request", "").upper()
+        if any(tag in request_upper for tag in ("[FORCE]", "[UPDATE]", "[NEW-ANGLE]", "[FORCE-PRODUCE]")):
+            logger.info("[EP] Dedup bypassed — override tag detected in request")
+            return state
+
+        keywords = state.get("keywords", [])
+        if len(keywords) < 2:
+            logger.info("[EP] Dedup skipped — fewer than 2 keywords extracted")
+            return state
+
+        similar = find_similar(keywords, hours=168.0)
+        if not similar:
+            return state
+
+        recent_text = format_for_llm(similar[:10])
+        logger.info(f"[EP] Dedup: found {len(similar)} similar story/stories in history — evaluating")
+
+        try:
+            response = await self.llm.ainvoke([
+                HumanMessage(content=STORY_DEDUP_PROMPT.format(
+                    topic=state["topic"],
+                    keywords=", ".join(keywords),
+                    recent_coverage=recent_text,
+                )),
+            ])
+            content = response.content.strip()
+            content = re.sub(r"^```(?:json)?\s*", "", content)
+            content = re.sub(r"\s*```$", "", content)
+            parsed = json.loads(content)
+            decision = parsed.get("decision", "PROCEED").upper()
+            reason = parsed.get("reason", "")
+
+            if decision == "SKIP":
+                logger.info(f"[EP] Dedup suppressed production: {reason[:120]}")
+                state["dedup_suppressed"] = True
+                state["dedup_reason"] = reason
+            elif decision == "PROCEED_AS_UPDATE":
+                logger.info(f"[EP] Dedup: story allowed as update — {reason[:120]}")
+                state["dedup_reason"] = reason
+                state["request"] = (
+                    state["request"]
+                    + f"\n\n[UPDATE NOTE: This is a follow-up to prior coverage. "
+                    f"Focus on the new development and do not recap the full backstory: {reason}]"
+                )
+            else:
+                logger.info(f"[EP] Dedup: story is new — proceeding")
+        except Exception as e:
+            logger.warning(f"[EP] Dedup check failed ({e}) — allowing production to proceed")
+
         return state
 
     async def _execute_step_node(self, state: ProductionState) -> ProductionState:
@@ -538,6 +618,18 @@ class Agent(BaseAgent):
         """Build the final production summary returned to Jarvis and save it to disk."""
         from datetime import datetime, timezone
 
+        # Short-circuit for dedup-suppressed productions — no log, no broadcast update
+        if state.get("dedup_suppressed"):
+            state["final_summary"] = (
+                f"**Production Suppressed — Duplicate Story**\n\n"
+                f"Topic: {state.get('topic', '')}\n\n"
+                f"This story has already been covered recently with no significant new development detected.\n"
+                f"Reason: {state.get('dedup_reason', '')}\n\n"
+                f"No video was generated and no HeyGen credits were consumed.\n"
+                f"To override, include [FORCE] or [UPDATE] in your request."
+            )
+            return state
+
         outputs = state.get("outputs", {})
         anchor_name = state.get("anchor_name", "")
         desk_name = state.get("desk_name", "")
@@ -616,6 +708,20 @@ class Agent(BaseAgent):
         except Exception as e:
             logger.warning(f"[EP] Could not save last_broadcast.json: {e}")
 
+        # Record to story_history so future productions can dedup against this one.
+        # Skip if researcher or anchor failed (no usable content was produced).
+        if not state.get("researcher_failed") and not state.get("anchor_failed"):
+            try:
+                from tools.story_history import record as _sh_record
+                _sh_record(
+                    topic=state.get("topic", ""),
+                    keywords=state.get("keywords", []),
+                    show_slug=state.get("show_slug", ""),
+                    workflow=state.get("workflow", ""),
+                )
+            except Exception as e:
+                logger.warning(f"[EP] Could not record to story_history: {e}")
+
         return state
 
     # ------------------------------------------------------------------ #
@@ -650,6 +756,9 @@ class Agent(BaseAgent):
                 "playlist_ids": [],
                 "extra_playlist_keys": [],
                 "outputs": {},
+                "keywords": [],
+                "dedup_suppressed": False,
+                "dedup_reason": "",
                 "current_step_index": 0,
                 "anchor_failed": False,
                 "researcher_failed": False,

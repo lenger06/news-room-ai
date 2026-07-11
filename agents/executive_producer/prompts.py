@@ -86,13 +86,16 @@ Return:
   "workflow": "RESEARCH_ONLY" | "ARTICLE" | "FULL_PRODUCTION" | "BROADCAST_VIDEO" | "SCRIPT_ONLY" | "VIDEO_FROM_SCRIPT" | "SPECIAL_REPORT",
   "topic": "the news topic in plain English",
   "desk": "desk slug that owns this story — must match one of the desk slugs above",
+  "keywords": ["keyword1", "keyword2", "keyword3", "keyword4"],
+  "anchor_override": null,
   "extra_playlists": ["key1", "key2"],
   "target_duration_seconds": null
 }}
 
 Rules:
 - Choose the desk whose beat best matches the story topic.
-- Anchor and look selection are handled automatically by the show schedule — do not include them in your response.
+- For keywords: provide 4-6 specific, discriminating terms — proper nouns, place names, key subjects from the topic. These are used for story deduplication to prevent re-covering the same event. Avoid generic words like "news", "update", "report", "breaking".
+- anchor_override: if the request explicitly names a specific anchor or on-air personality to host/anchor the segment (e.g. "have Shawn Green anchor", "with Daniel Mercer", "Alexa Chen should read this"), set this to their first name or full name exactly as mentioned. Otherwise set to null. Do not infer an anchor from the topic — only set this when a name is explicitly stated.
 - For extra_playlists: select zero or more keys from the available playlists list above.
   Use "breaking" if the story is urgent breaking news.
   Use "daily" if the story is a routine daily news summary or briefing.
@@ -112,4 +115,41 @@ Workflow step sets:
 - SCRIPT_ONLY:      ["script_writer", "producer"]
 - VIDEO_FROM_SCRIPT:["anchor", "video_editor", "producer", "publisher"]
 - SPECIAL_REPORT:   ["researcher", "writer", "fact_checker", "editor", "script_writer", "anchor", "video_editor", "producer", "publisher"]
+"""
+
+STORY_DEDUP_PROMPT = """A journalist has submitted a story request. Before committing production resources, evaluate whether this story has already been covered recently without a significant new development.
+
+REQUESTED TOPIC: {topic}
+KEYWORDS: {keywords}
+
+STORIES PRODUCED IN THE LAST 7 DAYS ON SIMILAR TOPICS:
+{recent_coverage}
+
+Decide which applies:
+
+SKIP — The same core event was already covered and nothing material has changed.
+  Routine updates that do NOT qualify as significant:
+  - Death toll or injury count rises from the same incident
+  - Officials restate the same position or hold a press conference
+  - "Rescue efforts continue" / "investigation ongoing" with no new findings
+  - Same story reframed with a slightly different headline angle
+  - A new country or group "expresses concern" about an ongoing event
+
+PROCEED_AS_UPDATE — Same underlying story but with a genuine, significant new development.
+  Significant developments that DO qualify:
+  - Status change: search operation → survivor found; accused → convicted; missing → confirmed dead
+  - Dramatic escalation: ceasefire collapses into renewed fighting; protest becomes riot; fire spreads to new district
+  - Major new revelation: criminal charges filed, whistleblower evidence emerges, government policy reversal
+  - New, distinct event in the same ongoing situation (e.g. a second earthquake aftershock causing new building collapses)
+
+PROCEED — This is a new story or a clearly distinct angle that has not been covered.
+  Always PROCEED if:
+  - The request contains [FORCE], [UPDATE], or [NEW-ANGLE] tags
+  - The story is geographically or factually distinct from prior coverage
+
+Respond with JSON only — no markdown, no explanation outside the JSON:
+{{
+  "decision": "PROCEED" | "SKIP" | "PROCEED_AS_UPDATE",
+  "reason": "concise explanation (1-2 sentences)"
+}}
 """

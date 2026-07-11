@@ -75,6 +75,20 @@ class Agent(BaseAgent):
             return f"\x00BROLL{len(broll_markers)-1}\x00"
         text = re.sub(r'\[BROLL:[^\]]*\]', _stash_broll, text, flags=re.IGNORECASE)
         text = re.sub(r'\*+|_+|`+|#{1,6}\s*', '', text)
+        # Strip metadata lines the LLM sometimes inserts
+        text = re.sub(
+            r'(?m)^\s*(?:Today\'?s?\s+date|Date|Topic|Subject|Workflow|Show|Desk|Segment)\s*:\s*[^\n]*\n?',
+            '', text, flags=re.IGNORECASE,
+        )
+        # Strip speaker attribution labels the LLM may have left in
+        text = re.sub(
+            r'(?m)^\s*(?:Anchor|Reporter|Host|Narrator|Voice\s*Over|VO)\s*:\s*"([^"]*)"',
+            r'\1', text, flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r'(?m)^\s*(?:Anchor|Reporter|Host|Narrator|Voice\s*Over|VO)\s*:\s*',
+            '', text, flags=re.IGNORECASE,
+        )
         # Strip any remaining [...] content — catches pronunciation guides like [shee jeen-PEENG],
         # [GRAPHIC:] or [PAUSE] the LLM missed. HeyGen TTS reads brackets literally.
         text = re.sub(r'\[[^\]]*\]', '', text)
@@ -114,6 +128,22 @@ class Agent(BaseAgent):
 
         text = re.sub(r'\[PAUSE\]', ', ', text, flags=re.IGNORECASE)
         text = re.sub(r'\[GRAPHIC:[^\]]*\]', '', text, flags=re.IGNORECASE)
+        # Strip metadata lines the LLM sometimes inserts (never spoken words)
+        text = re.sub(
+            r'(?m)^\s*(?:Today\'?s?\s+date|Date|Topic|Subject|Workflow|Show|Desk|Segment)\s*:\s*[^\n]*\n?',
+            '', text, flags=re.IGNORECASE,
+        )
+        # Strip speaker attribution labels — e.g. Anchor: "text" → text
+        # Handles quoted form: Anchor: "spoken words" → spoken words
+        text = re.sub(
+            r'(?m)^\s*(?:Anchor|Reporter|Host|Narrator|Voice\s*Over|VO)\s*:\s*"([^"]*)"',
+            r'\1', text, flags=re.IGNORECASE,
+        )
+        # Unquoted form: Anchor: spoken words → spoken words
+        text = re.sub(
+            r'(?m)^\s*(?:Anchor|Reporter|Host|Narrator|Voice\s*Over|VO)\s*:\s*',
+            '', text, flags=re.IGNORECASE,
+        )
         # Remove any remaining [...] — pronunciation guides, missed directives, etc.
         text = re.sub(r'\[[^\]]*\]', '', text)
         text = re.sub(r'\*+|_+|`+|#{1,6}\s*', '', text)
@@ -336,14 +366,14 @@ class Agent(BaseAgent):
             m = re.search(pattern, message, re.IGNORECASE)
             return m.group(1).strip() if m else ""
 
-        avatar_id     = find(r'AVATAR ID[ \t]*:[ \t]*([^\n]+)')
-        voice_id      = find(r'VOICE ID[ \t]*:[ \t]*([^\n]+)')
-        bg_id         = find(r'BACKGROUND ASSET ID[ \t]*:[ \t]*([^\n]+)')
-        voice_emotion = find(r'VOICE EMOTION[ \t]*:[ \t]*([^\n]+)')
-        talking_style = find(r'TALKING STYLE[ \t]*:[ \t]*([^\n]+)')
-        expression    = find(r'EXPRESSION[ \t]*:[ \t]*([^\n]+)')
-        pip_position  = find(r'PIP POSITION[ \t]*:[ \t]*([^\n]+)') or "left"
-        desk_slug     = find(r'DESK_SLUG[ \t]*:[ \t]*([^\n]+)')
+        avatar_id       = find(r'AVATAR ID[ \t]*:[ \t]*([^\n]+)')
+        voice_id        = find(r'VOICE ID[ \t]*:[ \t]*([^\n]+)')
+        bg_id           = find(r'BACKGROUND ASSET ID[ \t]*:[ \t]*([^\n]+)')
+        voice_emotion   = find(r'VOICE EMOTION[ \t]*:[ \t]*([^\n]+)')
+        talking_style   = find(r'TALKING STYLE[ \t]*:[ \t]*([^\n]+)')
+        expression      = find(r'EXPRESSION[ \t]*:[ \t]*([^\n]+)')
+        avatar_position = find(r'AVATAR POSITION[ \t]*:[ \t]*([^\n]+)') or "center"
+        desk_slug       = find(r'DESK_SLUG[ \t]*:[ \t]*([^\n]+)')
 
         return (
             avatar_id     or settings.HEYGEN_AVATAR_ID,
@@ -352,7 +382,7 @@ class Agent(BaseAgent):
             voice_emotion,
             talking_style,
             expression,
-            pip_position,
+            avatar_position,
             desk_slug,
         )
 
@@ -433,7 +463,7 @@ class Agent(BaseAgent):
                 logger.warning(f"[anchor] Could not verify HeyGen credits: {credit_err}")
 
             # Step 1: Extract HeyGen params from the message
-            avatar_id, voice_id, bg_id, voice_emotion, talking_style, expression, pip_position, desk_slug = self._extract_heygen_params(message)
+            avatar_id, voice_id, bg_id, voice_emotion, talking_style, expression, avatar_position, desk_slug = self._extract_heygen_params(message)
 
             # Step 1b: Apply background layers to the studio background
             bg_layers = get_background_layers(desk_slug)
@@ -485,7 +515,7 @@ class Agent(BaseAgent):
             submit_result = await asyncio.to_thread(
                 generate_video_multiscene,
                 segments, avatar_id, voice_id, bg_id, title,
-                voice_emotion, talking_style, expression, pip_position,
+                voice_emotion, talking_style, expression, avatar_position,
                 enhanced_bg_bytes,
             )
 

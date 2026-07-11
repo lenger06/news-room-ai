@@ -74,16 +74,16 @@ def get_show_anchor_name(show_slug: str, assignment) -> str:
     return chosen
 
 
-def get_next_look(anchor: Anchor, preference: str = "", desk: str = "") -> str:
+def get_next_look(anchor: Anchor, preference: str = "", desk: str = "") -> tuple[str, str]:
     """
-    Return the next avatar_id for this anchor, advancing the rotation index.
+    Return (avatar_id, avatar_position) for this anchor, advancing the rotation index.
     If preference is set (e.g. "formal", "casual", "sitting"), only looks whose
     description contains that keyword are included in the rotation pool.
     Falls back to all looks if no look matches the preference keyword.
     """
     if not anchor.avatars:
         logger.warning(f"[anchor_rotation] {anchor.name} has no avatars configured")
-        return ""
+        return "", "center"
 
     pref = preference.lower().strip() if preference else ""
     if pref:
@@ -101,9 +101,9 @@ def get_next_look(anchor: Anchor, preference: str = "", desk: str = "") -> str:
         selected = pool[0]
         logger.info(
             f"[anchor_rotation] {anchor.name} ({desk or 'desk?'}): "
-            f"only 1 look — avatar={selected.avatar_id[:20]}… [{selected.description[:60]}]"
+            f"only 1 look — avatar={selected.avatar_id[:20]}… [{selected.description[:60]}] pos={selected.avatar_position}"
         )
-        return selected.avatar_id
+        return selected.avatar_id, selected.avatar_position
 
     state = _load_state()
     key = anchor.name
@@ -115,6 +115,6 @@ def get_next_look(anchor: Anchor, preference: str = "", desk: str = "") -> str:
     logger.info(
         f"[anchor_rotation] {anchor.name} ({desk or 'desk?'}): "
         f"look {next_idx + 1}/{len(pool)} — avatar={selected.avatar_id[:20]}… "
-        f"[{selected.description[:60]}]"
+        f"[{selected.description[:60]}] pos={selected.avatar_position}"
     )
-    return selected.avatar_id
+    return selected.avatar_id, selected.avatar_position
