@@ -444,6 +444,8 @@ def generate_anchor_video(
         ],
         "dimension": {"width": 1280, "height": 720},
         "title": title or "News Segment",
+        "motion_prompt": _NEWS_ANCHOR_MOTION_PROMPT,
+        "caption": {"style": _CAPTION_STYLE},
     }
 
     try:
@@ -790,6 +792,15 @@ _AVATAR_OFFSET_X: dict[str, float] = {"left": -0.35, "center": 0.0, "right": 0.3
 _PIP_FROM_AVATAR:  dict[str, str]   = {"left": "right", "center": "left", "right": "left"}
 
 
+_NEWS_ANCHOR_MOTION_PROMPT = (
+    "Professional broadcast news anchor. Composed, confident posture. "
+    "Subtle, deliberate hand gestures to emphasize key points. "
+    "Natural head movements when transitioning between topics."
+)
+
+_CAPTION_STYLE = "classic"   # burned-in closed-caption style; "classic" = clean subtitle bar
+
+
 def generate_video_multiscene(
     segments: list,
     avatar_id: str,
@@ -801,6 +812,7 @@ def generate_video_multiscene(
     expression: str = "",
     avatar_position: str = "center",
     bg_bytes_override: bytes | None = None,
+    motion_prompt: str = _NEWS_ANCHOR_MOTION_PROMPT,
 ) -> dict:
     """
     Build and submit a multi-scene HeyGen video (Studio API v2).
@@ -917,6 +929,10 @@ def generate_video_multiscene(
         "video_inputs": video_inputs,
         "dimension": {"width": 1280, "height": 720},
         "title": title,
+        # motion_prompt: activates on v3 Avatar V engine; silently ignored by v2
+        "motion_prompt": motion_prompt,
+        # caption: burned-in closed captions; supported on v2/videos and v3/videos
+        "caption": {"style": _CAPTION_STYLE},
     }
 
     logger.info(f"[heygen] Submitting {len(video_inputs)}-scene payload:\n{_json.dumps(payload, indent=2)}")
@@ -965,9 +981,8 @@ def check_video_status(video_id: str) -> str:
 
     try:
         response = requests.get(
-            f"{HEYGEN_BASE_URL}/v1/video_status.get",
+            f"{HEYGEN_BASE_URL}/v3/videos/{video_id}",
             headers={"x-api-key": settings.HEYGEN_API_KEY},
-            params={"video_id": video_id},
             timeout=15,
         )
 

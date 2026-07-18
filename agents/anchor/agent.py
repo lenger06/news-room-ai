@@ -391,9 +391,8 @@ class Agent(BaseAgent):
     def _check_status_sync(self, video_id: str) -> dict:
         try:
             response = requests.get(
-                f"{HEYGEN_BASE_URL}/v1/video_status.get",
+                f"{HEYGEN_BASE_URL}/v3/videos/{video_id}",
                 headers={"x-api-key": settings.HEYGEN_API_KEY},
-                params={"video_id": video_id},
                 timeout=30,
             )
             if not response.ok:
