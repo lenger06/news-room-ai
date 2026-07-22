@@ -13,7 +13,7 @@ import requests
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from agents.registry import BaseAgent, AgentInfo
-from tools.heygen_tool import get_heygen_credits, generate_video_multiscene, delete_heygen_asset, prepare_enhanced_background
+from tools.heygen_tool import get_heygen_credits, generate_video_multiscene, generate_video_multiscene_v3, delete_heygen_asset, prepare_enhanced_background
 from config.overlays import get_background_layers
 from config.settings import settings
 
@@ -360,7 +360,7 @@ class Agent(BaseAgent):
 
     # ── HeyGen param extraction ──────────────────────────────────────────────
 
-    def _extract_heygen_params(self, message: str) -> tuple[str, str, str, str, str, str, str, str]:
+    def _extract_heygen_params(self, message: str) -> tuple[str, str, str, str, str, str, str, str, str]:
         """Parse HeyGen params injected by the executive producer."""
         def find(pattern):
             m = re.search(pattern, message, re.IGNORECASE)
@@ -374,6 +374,7 @@ class Agent(BaseAgent):
         expression      = find(r'EXPRESSION[ \t]*:[ \t]*([^\n]+)')
         avatar_position = find(r'AVATAR POSITION[ \t]*:[ \t]*([^\n]+)') or "center"
         desk_slug       = find(r'DESK_SLUG[ \t]*:[ \t]*([^\n]+)')
+        video_style     = find(r'VIDEO STYLE[ \t]*:[ \t]*([^\n]+)') or "pip_v2"
 
         return (
             avatar_id     or settings.HEYGEN_AVATAR_ID,
@@ -384,6 +385,7 @@ class Agent(BaseAgent):
             expression,
             avatar_position,
             desk_slug,
+            video_style,
         )
 
     # ── HeyGen polling ───────────────────────────────────────────────────────
@@ -398,11 +400,16 @@ class Agent(BaseAgent):
             if not response.ok:
                 return {"error": f"HTTP {response.status_code}: {response.text[:200]}"}
             data = response.json().get("data", {})
+            status = data.get("status", "unknown")
+            if status == "failed":
+                error_detail = data.get("error") or data.get("msg") or data.get("message") or response.text[:300]
+                logger.error(f"[heygen] Video {video_id} FAILED — detail: {error_detail}")
             return {
                 "video_id": video_id,
-                "status": data.get("status", "unknown"),
+                "status": status,
                 "video_url": data.get("video_url"),
                 "thumbnail_url": data.get("thumbnail_url"),
+                "error_detail": data.get("error") or data.get("msg"),
             }
         except Exception as e:
             logger.error(f"[heygen] status check error: {e}", exc_info=True)
@@ -462,7 +469,13 @@ class Agent(BaseAgent):
                 logger.warning(f"[anchor] Could not verify HeyGen credits: {credit_err}")
 
             # Step 1: Extract HeyGen params from the message
-            avatar_id, voice_id, bg_id, voice_emotion, talking_style, expression, avatar_position, desk_slug = self._extract_heygen_params(message)
+            avatar_id, voice_id, bg_id, voice_emotion, talking_style, expression, avatar_position, desk_slug, video_style = self._extract_heygen_params(message)
+
+            # Check for per-production [VIDEO-STYLE:...] override tag
+            _vs_override = re.search(r'\[VIDEO-STYLE:\s*([^\]]+)\]', message, re.IGNORECASE)
+            if _vs_override:
+                video_style = _vs_override.group(1).strip().lower()
+                logger.info(f"[anchor] Video style overridden via tag: {video_style!r}")
 
             # Step 1b: Apply background layers to the studio background
             bg_layers = get_background_layers(desk_slug)
@@ -511,8 +524,10 @@ class Agent(BaseAgent):
             title = re.search(r'TOPIC[ \t]*:[ \t]*([^\n]+)', message, re.IGNORECASE)
             title = title.group(1).strip() if title else "News Segment"
 
+            _gen_fn = generate_video_multiscene_v3 if video_style == "fullscreen_v3" else generate_video_multiscene
+            logger.info(f"[anchor] Video style: {video_style!r} → {_gen_fn.__name__}")
             submit_result = await asyncio.to_thread(
-                generate_video_multiscene,
+                _gen_fn,
                 segments, avatar_id, voice_id, bg_id, title,
                 voice_emotion, talking_style, expression, avatar_position,
                 enhanced_bg_bytes,

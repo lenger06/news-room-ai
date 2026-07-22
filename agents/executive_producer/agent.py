@@ -57,6 +57,7 @@ class ProductionState(TypedDict):
     show_slug: str
     show_name: str
     show_tone: str
+    video_style: str                 # "pip_v2" or "fullscreen_v3" — inherited from Show, overridable
 
     # Per-run output directory: ./output/{show_slug}/{run_id}
     output_dir: str
@@ -251,9 +252,10 @@ class Agent(BaseAgent):
                 else:
                     state["target_duration_seconds"] = None
 
-                # Show-level background overrides desk background (e.g. special-report has its own look)
+                # Show-level background and video style override desk defaults
                 if show.background_asset_id:
                     state["desk_background_asset_id"] = show.background_asset_id
+                state["video_style"] = show.video_style
                 logger.info(
                     f"[EP] Show: {show.name} | Workflow: {workflow} | Desk: {state['desk_name']} | "
                     f"Anchor: {anchor.name} | Avatar: {avatar_id[:24]}… | "
@@ -513,6 +515,7 @@ class Agent(BaseAgent):
                     f"BACKGROUND ASSET ID: {background_asset_id}\n"
                     f"DESK_SLUG: {state.get('desk', '')}\n"
                     f"TOPIC: {state.get('topic', '')}\n"
+                    f"VIDEO STYLE: {state.get('video_style', 'pip_v2')}\n"
                 )
             elif agent_name == "video_editor":
                 step_input += f"\n\nDESK_SLUG: {state.get('desk', '')}\n"
@@ -751,6 +754,7 @@ class Agent(BaseAgent):
                 "show_slug": (context or {}).get("show_slug", ""),
                 "show_name": "",
                 "show_tone": "",
+                "video_style": "pip_v2",
                 "output_dir": "",
                 "run_id": "",
                 "playlist_ids": [],

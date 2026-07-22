@@ -445,7 +445,7 @@ def generate_anchor_video(
         "dimension": {"width": 1280, "height": 720},
         "title": title or "News Segment",
         "motion_prompt": _NEWS_ANCHOR_MOTION_PROMPT,
-        "caption": {"style": _CAPTION_STYLE},
+        "caption": True,
     }
 
     try:
@@ -636,6 +636,48 @@ def _create_broll_video_composite(
         return None
 
 
+def _extract_frame_from_bytes(video_bytes: bytes, time_sec: float = 1.0) -> bytes | None:
+    """
+    Extract a single JPEG frame from in-memory video bytes using ffmpeg.
+    Returns JPEG bytes, or None on failure.
+    """
+    ffmpeg = _get_ffmpeg_exe()
+    if not ffmpeg or not video_bytes:
+        return None
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            vid_path   = tmp / "input.mp4"
+            frame_path = tmp / "frame.jpg"
+            vid_path.write_bytes(video_bytes)
+            cmd = [
+                ffmpeg, "-y",
+                "-ss", str(time_sec),
+                "-i", str(vid_path),
+                "-frames:v", "1",
+                "-q:v", "2",
+                str(frame_path),
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            if result.returncode == 0 and frame_path.exists():
+                data = frame_path.read_bytes()
+                logger.info(f"[heygen] Extracted frame from video bytes ({len(data):,} bytes)")
+                return data
+            logger.warning(f"[heygen] Frame extraction failed (rc={result.returncode})")
+    except Exception as e:
+        logger.warning(f"[heygen] _extract_frame_from_bytes error: {e}")
+    return None
+
+
+def _extract_video_frame(video_url: str, time_sec: float = 1.0) -> bytes | None:
+    """
+    Download a video clip (cached) and extract a single JPEG frame using ffmpeg.
+    Returns JPEG bytes, or None on failure.
+    """
+    video_bytes = _download_broll_video(video_url)
+    return _extract_frame_from_bytes(video_bytes, time_sec) if video_bytes else None
+
+
 def _download_broll_video(video_url: str) -> bytes | None:
     """
     Download a b-roll video clip, caching it to disk to avoid re-downloading.
@@ -799,6 +841,8 @@ _NEWS_ANCHOR_MOTION_PROMPT = (
 )
 
 _CAPTION_STYLE = "classic"   # burned-in closed-caption style; "classic" = clean subtitle bar
+_STUDIO_BG_COLOR = "#0d1b2a"       # deep navy — professional broadcast look for v3 full-screen style
+_V3_COLOR_BG = {"type": "color", "value": _STUDIO_BG_COLOR}  # v3 uses "value" not "color"
 
 
 def generate_video_multiscene(
@@ -929,10 +973,8 @@ def generate_video_multiscene(
         "video_inputs": video_inputs,
         "dimension": {"width": 1280, "height": 720},
         "title": title,
-        # motion_prompt: activates on v3 Avatar V engine; silently ignored by v2
         "motion_prompt": motion_prompt,
-        # caption: burned-in closed captions; supported on v2/videos and v3/videos
-        "caption": {"style": _CAPTION_STYLE},
+        "caption": True,
     }
 
     logger.info(f"[heygen] Submitting {len(video_inputs)}-scene payload:\n{_json.dumps(payload, indent=2)}")
@@ -959,6 +1001,203 @@ def generate_video_multiscene(
 
     except Exception as e:
         logger.error(f"[heygen] multiscene generate error: {e}", exc_info=True)
+        return {"error": str(e), "video_id": None}
+
+
+def _make_anchor_scene_v3(
+    script: str,
+    avatar_id: str,
+    voice_id: str,
+    motion_prompt: str,
+    voice_emotion: str = "",
+) -> dict:
+    """Build a v3 studio avatar_video scene (solid dark background)."""
+    inp = {
+        "type": "avatar",
+        "avatar_id": avatar_id,
+        "script": _normalize_tts(script)[:5000],
+        "voice_id": voice_id,
+        "background": _V3_COLOR_BG,
+    }
+    if voice_emotion:
+        inp["voice_settings"] = {"emotion": voice_emotion}
+    return {"type": "avatar_video", "input": inp}
+
+
+def _make_image_scene_v3(
+    script: str,
+    image_url: str,
+    voice_id: str,
+    voice_emotion: str = "",
+) -> dict:
+    """Build a v3 studio image scene — full-screen b-roll with anchor voiceover."""
+    scene: dict = {
+        "type": "image",
+        "source": {"type": "url", "url": image_url},
+        "script": _normalize_tts(script)[:5000],
+        "voice_id": voice_id,
+    }
+    if voice_emotion:
+        scene["voice_settings"] = {"emotion": voice_emotion}
+    return scene
+
+
+def generate_video_multiscene_v3(
+    segments: list,
+    avatar_id: str,
+    voice_id: str,
+    background_asset_id: str,
+    title: str = "News Segment",
+    voice_emotion: str = "",
+    talking_style: str = "",
+    expression: str = "",
+    avatar_position: str = "center",
+    bg_bytes_override: bytes | None = None,
+    motion_prompt: str = _NEWS_ANCHOR_MOTION_PROMPT,
+) -> dict:
+    """
+    Submit a single-scene HeyGen video using the v3 Avatar API.
+
+    Uses v3 type="avatar" (type="studio" requires a workspace feature flag not available on all plans).
+    All segment scripts are concatenated into one continuous anchor take. The first available b-roll
+    image is uploaded and used as the static background; falls back to solid dark color if none found.
+
+    Gains over v2: Avatar V engine (higher fidelity rendering) + motion_prompt (natural body language).
+
+    Returns {"video_id": "...", "status": "processing", "scene_count": 1, "uploaded_composites": [...]}
+         or {"error": "...", "video_id": None}
+    """
+    import json as _json
+
+    if not settings.HEYGEN_API_KEY:
+        return {"error": "HEYGEN_API_KEY not configured", "video_id": None}
+
+    # Concatenate all segment scripts — collapse whitespace so TTS doesn't stumble on \n\n
+    import re as _re2
+    full_script = " ".join(
+        _normalize_tts((seg.get("script") or "").strip())
+        for seg in segments
+        if (seg.get("script") or "").strip()
+    )
+    full_script = _re2.sub(r'\s+', ' ', full_script).strip()
+    if not full_script:
+        return {"error": "No valid segments to render", "video_id": None}
+
+    if len(full_script) > 5000:
+        logger.warning(f"[heygen-v3] Script truncated from {len(full_script)} to 5000 chars")
+        full_script = full_script[:5000]
+
+    # v3 type:"avatar" only accepts background type "color" or "image" — video is rejected.
+    # Strategy:
+    #   1. Load the studio background PNG from disk (bg_bytes_override is MP4 — do not use it here)
+    #   2. Find the first b-roll: prefer image URL; for video URL, extract a still frame
+    #   3. PIL-composite the b-roll as a PiP onto the studio PNG
+    #   4. Upload the resulting image → use as {"type": "image", "image_asset_id": ...}
+    pip_position = _PIP_FROM_AVATAR.get(avatar_position, "left")
+    uploaded_composites: list[dict] = []
+    background: dict = _V3_COLOR_BG  # final fallback
+
+    # Studio background: prefer PNG from disk; fall back to a frame extracted from
+    # the show's background video (already cached locally from v2 renders).
+    bg_frame: bytes | None = _load_bg_frame()
+    if not bg_frame and background_asset_id:
+        _bg_vid = _get_background_video_bytes(background_asset_id)
+        if _bg_vid:
+            bg_frame = _extract_frame_from_bytes(_bg_vid)
+            logger.info(f"[heygen-v3] Extracted studio background frame from video asset ({background_asset_id[:12]}...)")
+
+    # Find first b-roll — image preferred; extract frame from video if needed
+    broll_image_bytes: bytes | None = None
+    for _seg in segments:
+        _iurl = (_seg.get("image_url") or "").strip()
+        _vurl = (_seg.get("video_url") or "").strip()
+        if _iurl:
+            try:
+                _r = requests.get(_iurl, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+                if _r.ok and _r.content:
+                    broll_image_bytes = _r.content
+                    logger.info(f"[heygen-v3] B-roll image for PiP: {_iurl[:60]}")
+            except Exception as _e:
+                logger.warning(f"[heygen-v3] Failed to download b-roll image: {_e}")
+            break
+        if _vurl:
+            broll_image_bytes = _extract_video_frame(_vurl)
+            if broll_image_bytes:
+                logger.info(f"[heygen-v3] Extracted frame from b-roll video: {_vurl[:60]}")
+            break
+
+    # Build the background image: PiP composite if b-roll available, else plain studio frame
+    if bg_frame and broll_image_bytes:
+        bg_image = _create_pip_composite(broll_image_bytes, bg_bytes=bg_frame, pip_position=pip_position) or bg_frame
+    else:
+        bg_image = bg_frame
+
+    if bg_image:
+        try:
+            content_type = "image/png" if bg_image[:4] == b'\x89PNG' else "image/jpeg"
+            _up = requests.post(
+                f"{HEYGEN_UPLOAD_URL}/v1/asset",
+                headers={"X-Api-Key": settings.HEYGEN_API_KEY, "Content-Type": content_type},
+                data=bg_image,
+                timeout=60,
+            )
+            if _up.ok:
+                _aid = _up.json().get("data", {}).get("id")
+                if _aid:
+                    background = {"type": "image", "asset_id": _aid}
+                    uploaded_composites.append({"asset_id": _aid, "cache_path": None})
+                    logger.info(f"[heygen-v3] Background image uploaded → {_aid}")
+                else:
+                    logger.warning("[heygen-v3] Background upload returned no id — using dark color")
+            else:
+                logger.warning(f"[heygen-v3] Background upload failed (HTTP {_up.status_code}) — using dark color")
+        except Exception as _e:
+            logger.warning(f"[heygen-v3] Background upload error: {_e} — using dark color")
+    else:
+        logger.info("[heygen-v3] BROLL_BG_FRAME_PATH not configured — using dark color fallback")
+
+    payload: dict = {
+        "type": "avatar",
+        "avatar_id": avatar_id,
+        "script": full_script,
+        "voice_id": voice_id,
+        "background": background,
+        "engine": {"type": "avatar_v"},
+        "motion_prompt": motion_prompt,
+        "resolution": "1080p",
+        "aspect_ratio": "16:9",
+        "title": title,
+    }
+    # v3 voice_settings has no "emotion" field — drop it to avoid render failure
+
+    logger.info(f"[heygen-v3] Submitting v3 avatar payload ({len(full_script)} chars):\n{_json.dumps(payload, indent=2)}")
+
+    try:
+        response = requests.post(
+            f"{HEYGEN_BASE_URL}/v3/videos",
+            headers={"x-api-key": settings.HEYGEN_API_KEY, "Content-Type": "application/json"},
+            json=payload,
+            timeout=120,
+        )
+        if not response.ok:
+            return {"error": f"HeyGen v3 HTTP {response.status_code}: {response.text[:200]}", "video_id": None}
+
+        data = response.json()
+        video_id = (
+            data.get("data", {}).get("video_id")
+            or data.get("data", {}).get("id")
+            or data.get("video_id")
+        )
+        logger.info(f"[heygen-v3] Avatar video submitted: {video_id}")
+        return {
+            "video_id": video_id,
+            "status": "processing",
+            "scene_count": 1,
+            "uploaded_composites": uploaded_composites,
+        }
+
+    except Exception as e:
+        logger.error(f"[heygen-v3] avatar generate error: {e}", exc_info=True)
         return {"error": str(e), "video_id": None}
 
 

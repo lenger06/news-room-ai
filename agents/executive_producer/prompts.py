@@ -93,6 +93,7 @@ Return:
 }}
 
 Rules:
+- If the request contains a [WORKFLOW: X] tag (e.g. [WORKFLOW: BROADCAST_VIDEO]), use that workflow value exactly — do not infer a different one from the request text.
 - Choose the desk whose beat best matches the story topic.
 - For keywords: provide 4-6 specific, discriminating terms — proper nouns, place names, key subjects from the topic. These are used for story deduplication to prevent re-covering the same event. Avoid generic words like "news", "update", "report", "breaking".
 - anchor_override: if the request explicitly names a specific anchor or on-air personality to host/anchor the segment (e.g. "have Shawn Green anchor", "with Daniel Mercer", "Alexa Chen should read this"), set this to their first name or full name exactly as mentioned. Otherwise set to null. Do not infer an anchor from the topic — only set this when a name is explicitly stated.

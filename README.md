@@ -119,21 +119,34 @@ The Executive Producer selects the anchor assigned to the active show and desk, 
 
 **Current roster:**
 
-| On-air name | HeyGen actor | Desks |
-|---|---|---|
-| Shawn Green | Shawn (3 looks) | Politics, National, Foreign, Special Reports |
-| Daniel Mercer | Daniel Mercer | National, Politics, Foreign (Morning Report lead) |
-| Nicholas Stavros | Kurt | National (Evening News lead) |
-| Dominic Fairchild | Man in the Sport Coat | Politics, National |
-| Alexa Chen | Alexa | Entertainment |
-| Monica Hayes | Saskia (3 looks) | Entertainment |
-| Valerie Brooks | Candace (2 looks) | Entertainment |
-| Zayne Carter | Zayne (2 looks) | Entertainment |
-| Karoline Faye | Brooklyn (2 looks) | Entertainment |
-| Victor Marinos | Ricardo (3 looks) | Politics |
-| Brandon Jones | Brandon in Grey Suit | Business |
-| Alister Blackwood | Dexter Suit Front | Investigative |
-| Darlene Smith | Crystal Veil | Health & Science |
+| On-air name | HeyGen actor | Desks | Engine |
+|---|---|---|---|
+| Shawn Green | Shawn (3 looks) | Politics, National, Foreign, Special Reports | v2 |
+| Daniel Mercer | Daniel Mercer | National, Politics, Foreign (Morning Report lead) | v2 |
+| Nicholas Stavros | Kurt | National (Evening News lead) | v2 |
+| Dominic Fairchild | Man in the Sport Coat | Politics, National | v2 |
+| Alexa Chen | Alexa | Entertainment | v2 |
+| Monica Hayes | Saskia (3 looks) | Entertainment | v2 |
+| Valerie Brooks | Candace (2 looks) | Entertainment | v2 |
+| Zayne Carter | Zayne (2 looks) | Entertainment | v2 |
+| Karoline Faye | Brooklyn (2 looks) | Entertainment | v2 |
+| Victor Marinos | Ricardo (3 looks) | Politics | v2 |
+| Brandon Jones | Brandon in Grey Suit | Business | v2 |
+| Alister Blackwood | Dexter Suit Front | Investigative | v2 |
+| Darlene Smith | Crystal Veil | Health & Science | v2 |
+| **Marco Reyes** | PAOS (3 looks) | National | **Avatar V only** |
+| **Elise Navarro** | PAOS | National | **Avatar V only** |
+| **Elena Vasquez** | PAOS | National | **Avatar V only** |
+
+### Avatar V Anchors (`avatar_v_only`)
+
+Marco Reyes, Elise Navarro, and Elena Vasquez are **PAOS** (Public Avatar On-Screen) avatars that require HeyGen's **Avatar V** engine and the **v3 API**. They are flagged `avatar_v_only=True` in `config/anchors.py`, which means:
+
+- They are **excluded from all automatic desk and random anchor lookups** — they cannot be accidentally assigned to a standard `pip_v2` production
+- They are only used when **explicitly named** in a request (e.g. `have Elise Navarro anchor this`) or when a show is configured with `video_style = "fullscreen_v3"`
+- Their look IDs are **incompatible with the v2 API** — only use them with `[SHOW: ...]` + `fullscreen_v3` style or direct v3 API calls
+
+To produce a full-screen Avatar V broadcast, set `video_style = "fullscreen_v3"` on the show in `config/shows.py` or pass `[VIDEO-STYLE:fullscreen_v3]` in the request.
 
 To add an anchor, add an entry to the `ANCHORS` list in `config/anchors.py`. Each look is an `AvatarLook(avatar_id, description)` — HeyGen names are noted in comments next to each ID:
 
@@ -290,11 +303,20 @@ To add a new rule, append a tuple to `_TTS_REPLACEMENTS` at the top of `tools/he
 |----------|----------------|-------|
 | `RESEARCH_ONLY` | "research", "find information about", "what do we know about" | Researcher |
 | `ARTICLE` | "write an article", "write a story", "cover this story" | Researcher → Writer → Fact Checker → Editor → Producer |
-| `FULL_PRODUCTION` | "full production", "produce a segment", "news segment", "broadcast" | Researcher → Writer → Fact Checker → Editor → Script Writer → Producer |
-| `BROADCAST_VIDEO` | "video", "youtube", "record", "generate video", "publish" | Researcher → Writer → Fact Checker → Editor → Script Writer → Anchor → Video Editor → Producer → Publisher |
+| `FULL_PRODUCTION` | "full production", "produce a segment", "news segment", "broadcast" | Researcher → Writer → Fact Checker → Script Writer → Producer *(no video)* |
+| `BROADCAST_VIDEO` | "video", "youtube", "record", "generate video", "broadcast video", "publish" | Researcher → Writer → Fact Checker → Script Writer → Anchor → Video Editor → Producer → Publisher |
 | `SPECIAL_REPORT` | "special report", "deep dive", "in-depth", "long-form", "comprehensive coverage" | Same steps as BROADCAST_VIDEO with extended research, long-form writing, and full-duration scripting |
 | `SCRIPT_ONLY` | "script only", "write a script", "turn this into a script" (with content) | Script Writer → Producer |
 | `VIDEO_FROM_SCRIPT` | "video from script", "record this script", "generate video from script" | Anchor → Video Editor → Producer → Publisher |
+
+> **Note:** `FULL_PRODUCTION` produces a script but **no video**. Use `BROADCAST_VIDEO` (or say "broadcast video", "generate a video", "publish") to get a HeyGen render and YouTube upload.
+
+You can also override the workflow explicitly with a tag anywhere in the request — the EP treats this as authoritative and will not infer a different workflow from the request text:
+
+```
+[WORKFLOW: BROADCAST_VIDEO] Produce a segment on the latest White House briefing
+[WORKFLOW: RESEARCH_ONLY] SpaceX Starship latest developments
+```
 
 The pipeline aborts early and logs an error (without publishing) if the Researcher returns no usable content — e.g. when Tavily is rate-limited or unavailable.
 
@@ -359,6 +381,28 @@ pip install -r requirements.txt
 2. Add anchors to `config/anchors.py` with avatar and voice IDs:
    - Call `GET https://api.heygen.com/v2/avatars` with your API key to list available avatars
    - Call `GET https://api.heygen.com/v2/voices` to list voices
+
+#### V3 API & Avatar V
+
+The newsroom uses two HeyGen API versions in parallel:
+
+| | V2 (`/v2/video/generate`) | V3 (`/v3/videos`) |
+|---|---|---|
+| Used by | `pip_v2` shows (standard) | `fullscreen_v3` shows |
+| Background | `type: "video"` looping asset | `type: "color"` or `type: "image"` (no video) |
+| Caption | `"caption": true` (boolean) | Not supported — omit |
+| Engine | Default | `{"type": "avatar_v"}` for PAOS avatars |
+| `voice_settings.emotion` | Supported | Not supported — omit |
+| `remove_background` | Supported | Not supported for PAOS — causes render failure |
+
+Key V3 rules learned from production:
+- **Background must be `"color"` or `"image"`** — `"video"` returns HTTP 400
+- **Background image must be uploaded** via `POST https://upload.heygen.com/v1/asset` — use the returned `asset_id`
+- **No `emotion` in voice_settings** — omit the field entirely; including it causes render failure
+- **No `remove_background`** — PAOS avatars don't support matting; field causes render failure
+- **No `caption`** — not supported in v3; omit entirely
+
+A Postman collection covering all v3 endpoints, known-good payloads for each PAOS anchor, and documented failure cases is included at `HeyGen_V3.postman_collection.json`. Import it and set the `HEYGEN_API_KEY` collection variable to test.
 
 ### YouTube Setup
 

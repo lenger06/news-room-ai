@@ -27,6 +27,7 @@ class Anchor:
     voice_emotion: Optional[str] = None   # "Excited" | "Friendly" | "Serious" | "Soothing" | "Broadcaster"
     talking_style: Optional[str] = None  # "stable" | "expressive" (talking_photo avatars only)
     expression: Optional[str] = None     # "default" | "happy" (talking_photo avatars only)
+    avatar_v_only: bool = False     # True = PAOS/Avatar V anchors; excluded from pip_v2 shows unless explicitly named
 
     @property
     def default_avatar_id(self) -> str:
@@ -233,6 +234,47 @@ ANCHORS: list[Anchor] = [
         expression="happy",
     ),
 
+    Anchor(
+        name="Marco Reyes",
+        avatars=[
+            AvatarLook("3ccc4060113043f0a92681d1ed56f4d0", "office setting, front-facing — Avatar V compatible, national and breaking news"),   # Marco Office20 P1 5S6 A1
+            AvatarLook("daee99179dd644a5bdd46ecf95064eeb", "office setting, alternate angle — Avatar V compatible, national and breaking news"), # Marco Office2 R1 P1 5S6 A1
+            AvatarLook("fbee11f583244c1095136b049cd1bbd2", "kitchen/studio setting — Avatar V compatible, feature stories"),                    # Marco Kitchen10 P1 R1 5S6 A4
+        ],
+        voice_id="544053989dc94655915bc864a5f81b53",
+        desk="national",
+        bio="General assignment anchor. Avatar V / fullscreen_v3 style only — do not use for pip_v2 productions.",
+        voice_emotion="Broadcaster",
+        talking_style="stable",
+        avatar_v_only=True,
+    ),
+
+    Anchor(
+        name="Elise Navarro",
+        avatars=[
+            AvatarLook("21cb3594f3934b14b688e001ef67d779", "studio setting — Avatar V compatible, national and breaking news"),
+        ],
+        voice_id="e054554137024015b09bbfa1c1ace96d",
+        desk="national",
+        bio="General assignment anchor. Avatar V / fullscreen_v3 style only — do not use for pip_v2 productions.",
+        voice_emotion="Broadcaster",
+        talking_style="stable",
+        avatar_v_only=True,
+    ),
+
+    Anchor(
+        name="Elena Vasquez",
+        avatars=[
+            AvatarLook("33c459f870d541f09c6733189b557d23", "studio setting — Avatar V compatible, national and breaking news"),
+        ],
+        voice_id="ac7d71d630d041a7b90473492c6d9a1c",
+        desk="national",
+        bio="General assignment anchor. Avatar V / fullscreen_v3 style only — do not use for pip_v2 productions.",
+        voice_emotion="Broadcaster",
+        talking_style="stable",
+        avatar_v_only=True,
+    ),
+
     # Add more anchors below:
     # Anchor(
     #     name="Jordan Lee",
@@ -256,24 +298,32 @@ def get_anchor(name: Optional[str] = None, desk: Optional[str] = None) -> "Ancho
     """
     Return an anchor by name (case-insensitive partial match), by desk slug,
     or randomly if neither is specified. Falls back to first anchor if not found.
+
+    avatar_v_only anchors (Marco, Elise, Elena) are only returned when explicitly
+    requested by name — they are excluded from desk and random lookups so they
+    cannot be accidentally assigned to pip_v2 productions.
     """
     if not ANCHORS:
         raise ValueError("No anchors configured in config/anchors.py")
 
+    pip_anchors = [a for a in ANCHORS if not a.avatar_v_only]
+
     if name:
         name_lower = name.lower()
-        for anchor in ANCHORS:
+        for anchor in ANCHORS:   # explicit name requests search the full list
             if name_lower in anchor.name.lower():
                 return anchor
-        return ANCHORS[0]
+        return pip_anchors[0] if pip_anchors else ANCHORS[0]
+
+    pool = pip_anchors if pip_anchors else ANCHORS
 
     if desk:
-        desk_anchors = _DESK_MAP.get(desk)
+        desk_anchors = [a for a in _DESK_MAP.get(desk, []) if not a.avatar_v_only]
         if desk_anchors:
             return desk_anchors[0]
-        return ANCHORS[0]
+        return pool[0]
 
-    return random.choice(ANCHORS)
+    return random.choice(pool)
 
 
 def list_anchors() -> list[dict]:
@@ -281,13 +331,16 @@ def list_anchors() -> list[dict]:
     return [{"name": a.name, "desk": a.desk, "bio": a.bio, "looks": a.list_looks()} for a in ANCHORS]
 
 
-def list_anchors_for_prompt() -> str:
+def list_anchors_for_prompt(include_v3: bool = False) -> str:
     """
     Return a formatted string describing each anchor and their available looks.
     Used in the Executive Producer analysis prompt so the LLM can choose the best look.
+    avatar_v_only anchors are excluded unless include_v3=True.
     """
     lines = []
     for a in ANCHORS:
+        if a.avatar_v_only and not include_v3:
+            continue
         looks = " | ".join(f'"{lk.description}"' for lk in a.avatars)
         lines.append(f"  {a.name} ({a.desk}) — looks: {looks}")
     return "\n".join(lines)
