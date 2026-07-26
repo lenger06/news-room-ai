@@ -24,7 +24,7 @@ class Agent(BaseAgent):
     """Researcher — gathers and summarises source material for a story."""
 
     def __init__(self):
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
+        self.llm = ChatOpenAI(model=settings.model_for("researcher"), temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
         self.tools = [web_research_tool, image_search_tool, video_search_tool, file_operations_tool]
         prompt = ChatPromptTemplate.from_messages([
             ("system", RESEARCHER_PROMPT),

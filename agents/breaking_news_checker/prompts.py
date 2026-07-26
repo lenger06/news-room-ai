@@ -96,3 +96,44 @@ Confidence levels:
 For production_message use this format when breaking news is found:
 "BREAKING: [story description]. Cover this story immediately as breaking news — lead with the breaking development, do not recap previously covered stories."
 """
+
+WEBHOOK_EVENT_EVAL_PROMPT = """Current date/time: {current_datetime}
+
+## Incoming event (from an external push feed, not a headline scan)
+Source: {source}
+Headline: {headline}
+Detail: {detail}
+URL: {url}
+
+## Breaking news already covered in the last 72 hours
+{recent_log}
+
+An automated feed (earthquake sensor, weather alert, market-data stream, RSS bridge, etc.) has \
+already flagged this event as unusual — your job is to judge whether it clears the breaking-news \
+threshold for interrupting the normal broadcast schedule, not to discover or search for it yourself.
+
+CRITICAL — Ongoing story rule / dedup:
+If this event shares two or more keywords with ANY entry in the recent log, it must represent a \
+definitive, game-changing escalation to qualify — not just a new data point on an already-covered \
+story (e.g. a second, larger earthquake aftershock rather than routine aftershock #6).
+
+Respond with ONLY a valid JSON object — no markdown fences, no explanation outside the JSON:
+{{
+  "breaking_news_found": true or false,
+  "confidence": "high" or "medium" or "low",
+  "topic": "brief story description",
+  "headline": "the headline to use for this story",
+  "reason": "why this qualifies OR why it doesn't (always required)",
+  "keywords": ["keyword1", "keyword2"],
+  "production_message": "concise instruction for the newsroom (only if breaking_news_found=true, otherwise empty string)"
+}}
+
+Confidence levels:
+- "high"   — event clearly meets one of the auto-qualify criteria; no ambiguity
+- "medium" — borderline case; significant but does not cleanly match a listed criterion
+- "low"    — newsworthy but does not meet the threshold, OR you are uncertain — skip
+
+For production_message use this format when breaking news is found:
+"BREAKING: [story description]. Cover this story immediately as breaking news — lead with the \
+breaking development, do not recap previously covered stories."
+"""

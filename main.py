@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
     settings.validate()
 
     from agents.registry import agent_registry
-    for name in ["researcher", "writer", "fact_checker", "script_writer", "anchor", "video_editor", "producer", "publisher", "executive_producer", "breaking_news_checker"]:
+    for name in ["researcher", "writer", "fact_checker", "editor", "script_writer", "anchor", "video_editor", "compliance_checker", "producer", "publisher", "executive_producer", "breaking_news_checker"]:
         agent = await agent_registry.get_agent(name)
         logger.info(f"  {'✓' if agent else '✗'} {name}")
 
@@ -115,6 +115,14 @@ class ProductionResponse(BaseModel):
     agent: str = "executive_producer"
 
 
+class WebhookEventRequest(BaseModel):
+    source: str                        # e.g. "usgs_earthquake", "nws_alert", "market_data", "rss_bridge"
+    headline: str                      # short description of the event
+    detail: Optional[str] = ""         # additional detail text, if any
+    url: Optional[str] = ""            # source URL, if any
+    keywords: Optional[list[str]] = None   # dedup keywords, if the feed adapter already knows good ones
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.get("/")
 async def root():
@@ -126,6 +134,7 @@ async def root():
         "endpoints": {
             "produce": "POST /produce",
             "produce_stream": "POST /produce/stream",
+            "webhook_ingest": "POST /webhook/ingest",
             "health": "GET /health",
             "docs": "GET /docs",
         },
@@ -139,7 +148,7 @@ async def health():
         "status": "healthy",
         "agents": {
             name: ("ready" if agent_registry.get_agent_info(name) else "missing")
-            for name in ["executive_producer", "researcher", "writer", "fact_checker", "script_writer", "anchor", "video_editor", "producer", "publisher"]
+            for name in ["executive_producer", "researcher", "writer", "fact_checker", "editor", "script_writer", "anchor", "video_editor", "compliance_checker", "producer", "publisher"]
         },
     }
 
@@ -259,7 +268,14 @@ async def produce_async(body: ProductionRequest):
 
             context = {"show_slug": show_slug} if show_slug else {}
             result = await ep.process_message(message, context=context)
-            _jobs[job_id]["status"] = "complete"
+            # A halted/failed production (e.g. needs_human_review) must surface as
+            # status="error" — Jarvis's polling only alerts on that status, and a
+            # halt reported as "complete" is a halt nobody finds out about.
+            if result.get("success", True):
+                _jobs[job_id]["status"] = "complete"
+            else:
+                _jobs[job_id]["status"] = "error"
+                _jobs[job_id]["error"] = result.get("response", "")
             _jobs[job_id]["result"] = result.get("response", "")
             _jobs[job_id]["workflow"] = result.get("workflow")
             _jobs[job_id]["topic"] = result.get("topic")
@@ -271,6 +287,35 @@ async def produce_async(body: ProductionRequest):
     asyncio.create_task(run_job())
     logger.info(f"[async] Job {job_id} started for: {body.request[:80]}")
     return {"job_id": job_id, "status": "started"}
+
+
+@app.post("/webhook/ingest")
+async def webhook_ingest(body: WebhookEventRequest):
+    """
+    Shared entry point for external event feeds — an earthquake/weather/market-data poller,
+    an RSS-to-webhook bridge, etc. Normalizes any push source into one shape and routes it
+    through the same newsworthiness/dedup/cooldown gates as the internal breaking-news poll
+    (breaking_news_checker), firing a production only if the event clears the bar.
+    See SELF_IMPROVEMENT_ROADMAP.md Phase 5 for the intended source adapters.
+    """
+    try:
+        from agents.registry import agent_registry
+        checker = await agent_registry.get_agent("breaking_news_checker")
+        if not checker:
+            raise HTTPException(status_code=503, detail="Breaking News Checker not available")
+        result = await checker.process_webhook_event(
+            source=body.source,
+            headline=body.headline,
+            detail=body.detail or "",
+            url=body.url or "",
+            keywords=body.keywords,
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Webhook ingest error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/video/{video_id}/poll")

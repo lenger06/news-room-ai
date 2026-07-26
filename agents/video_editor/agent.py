@@ -25,7 +25,7 @@ class Agent(BaseAgent):
     """Video Editor — downloads the anchor video, extracts graphic cues, builds the video package."""
 
     def __init__(self):
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
+        self.llm = ChatOpenAI(model=settings.model_for("video_editor"), temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
         self.tools = [download_video, extract_graphic_cues, save_video_package, file_operations_tool]
         prompt = ChatPromptTemplate.from_messages([
             ("system", VIDEO_EDITOR_PROMPT),

@@ -26,7 +26,7 @@ class Agent(BaseAgent):
     """Publisher — reads the video package, uploads to YouTube exactly once, sets thumbnail."""
 
     def __init__(self):
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
+        self.llm = ChatOpenAI(model=settings.model_for("publisher"), temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
         # LLM only gets file_operations_tool to read the package — no upload tool
         self.tools = [file_operations_tool]
         prompt = ChatPromptTemplate.from_messages([

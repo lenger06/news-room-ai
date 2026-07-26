@@ -11,6 +11,25 @@ class Settings:
     # LLM
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 
+    # Per-agent model selection. Override any role via env var (e.g. MODEL_FACT_CHECKER=gpt-4o)
+    # without touching agent code — lets you tier a stronger/more expensive model onto
+    # verification-heavy roles (fact_checker, compliance_checker) and a cheaper one onto
+    # routine drafting roles, independently of each other.
+    MODELS: dict = {
+        "executive_producer": os.getenv("MODEL_EXECUTIVE_PRODUCER", "gpt-4o"),
+        "researcher": os.getenv("MODEL_RESEARCHER", "gpt-4o"),
+        "writer": os.getenv("MODEL_WRITER", "gpt-4o"),
+        "fact_checker": os.getenv("MODEL_FACT_CHECKER", "gpt-4o"),
+        "editor": os.getenv("MODEL_EDITOR", "gpt-4o"),
+        "script_writer": os.getenv("MODEL_SCRIPT_WRITER", "gpt-4o"),
+        "anchor": os.getenv("MODEL_ANCHOR", "gpt-4o"),
+        "video_editor": os.getenv("MODEL_VIDEO_EDITOR", "gpt-4o"),
+        "producer": os.getenv("MODEL_PRODUCER", "gpt-4o"),
+        "publisher": os.getenv("MODEL_PUBLISHER", "gpt-4o"),
+        "breaking_news_checker": os.getenv("MODEL_BREAKING_NEWS_CHECKER", "gpt-4o"),
+        "compliance_checker": os.getenv("MODEL_COMPLIANCE_CHECKER", "gpt-4o"),
+    }
+
     # Search
     TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
     PIXABAY_API_KEY: str = os.getenv("PIXABAY_API_KEY", "")  # for video b-roll search
@@ -46,6 +65,11 @@ class Settings:
     # Studio background videos for FFmpeg PiP compositing:
     # Place them in ./assets/ named after the HeyGen asset ID, e.g.:
     #   ./assets/f6fa4085043140deaba8258a96233036.mp4
+
+    @classmethod
+    def model_for(cls, role: str) -> str:
+        """Return the configured model name for an agent role, defaulting to gpt-4o."""
+        return cls.MODELS.get(role, "gpt-4o")
 
     @classmethod
     def validate(cls):

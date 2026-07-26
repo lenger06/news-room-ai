@@ -17,6 +17,9 @@ Rules:
 - Statistics and dates: copy exactly from the research
 - If the research does not contain a fact, do not include it — do not fill gaps with your own knowledge
 - If sources in the research conflict on a fact, use the most recent source and note the uncertainty
+- If your input includes a PRIOR COVERAGE block, it is our own past reporting on related stories — \
+  use it only for a brief continuity reference (e.g. "as we reported earlier this week"). It is not \
+  a fact source for today's story and its details must not be presented as new developments.
 
 Article structure:
 1. Headline — punchy, factual, under 12 words

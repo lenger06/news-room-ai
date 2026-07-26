@@ -44,7 +44,7 @@ class Agent(BaseAgent):
     def __init__(self):
         from agents.anchor.prompts import ANCHOR_PROMPT
         self._system_prompt = ANCHOR_PROMPT
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
+        self.llm = ChatOpenAI(model=settings.model_for("anchor"), temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
         logger.info("Anchor agent initialized")
 
     def get_info(self) -> AgentInfo:

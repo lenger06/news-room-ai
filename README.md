@@ -1,8 +1,10 @@
 # Newsroom AI
 
-An AI-powered broadcast newsroom that researches topics, fact-checks articles, writes news content, produces broadcast anchor scripts, generates AI anchor videos via HeyGen, and publishes to YouTube — all orchestrated by an Executive Producer agent.
+An AI-powered broadcast newsroom that researches topics, adversarially fact-checks and self-corrects articles, screens scripts for YouTube policy compliance before publish, writes news content, produces broadcast anchor scripts, generates AI anchor videos via HeyGen, and publishes to YouTube — all orchestrated by an Executive Producer agent.
 
-Designed to run as a standalone backend service called by [Jarvis](https://github.com/lenger06/jarvis-assistant-ai) or any other client via a simple HTTP API.
+Designed to run as a standalone backend service called by [Jarvis](https://github.com/lenger06/jarvis-assistant-ai) or any other client via a simple HTTP API. It can also be pushed into via `POST /webhook/ingest` from external event feeds (earthquake/weather/market-data pollers, an RSS bridge, etc.) instead of only being pulled on a schedule.
+
+See [`SELF_IMPROVEMENT_ROADMAP.md`](SELF_IMPROVEMENT_ROADMAP.md) for the in-progress plan toward a more autonomous, self-improving newsroom — what's landed, what's next, and why.
 
 ---
 
@@ -185,6 +187,20 @@ Deduplication and rate-limiting:
 
 Criteria are defined in `agents/breaking_news_checker/prompts.py`. The coverage log is persisted to `./output/breaking_news_log.json`.
 
+**Event webhooks:** `POST /webhook/ingest` gives external push sources a second way in, alongside the 30-minute poll. Send a normalized event:
+
+```json
+{
+  "source": "usgs_earthquake",
+  "headline": "M7.2 earthquake strikes Region X",
+  "detail": "Depth 12km, optional extra context",
+  "url": "https://earthquake.usgs.gov/example",
+  "keywords": ["earthquake", "region-x"]
+}
+```
+
+It's evaluated by the same LLM qualifying-criteria judgment and same-story dedup/cooldown gates as the headline-scan path (`breaking_news_checker.process_webhook_event()`), then fires a production the same way if it clears the bar. The endpoint and gating logic are live; the actual feed adapters/pollers (USGS earthquake, NWS weather alerts, market-data streams, an RSS-to-webhook bridge) are not — see `SELF_IMPROVEMENT_ROADMAP.md` Phase 5.
+
 ### Story Deduplication (EP Dedup Gate)
 
 Before committing to any production pipeline, the Executive Producer runs a **dedup check** against the last 7 days of story history. This prevents the same event from being covered repeatedly when nothing material has changed — which wastes HeyGen credits and fills the channel with duplicate content.
@@ -239,13 +255,15 @@ Receives the research brief and writes a polished news article. Standard product
 In Special Report mode: writes a long-form analytical piece structured as Executive Summary → Background & Context → Key Developments → Multiple Perspectives & Expert Analysis → Implications & What's Next → Conclusion. May add explanatory context and analytical commentary beyond the raw research facts to fill the target word count.
 
 ### Fact Checker
-Reads the draft article and verifies key factual claims using web search. Priority check: confirms the current title and status of every named political figure, head of state, and official — "former" applied to a sitting official is a broadcast-level error. Produces a Fact Check Report with three sections — **Verified**, **Unverified**, and **Corrections Needed** — and issues one of three verdicts:
+Reads the draft article and verifies key factual claims using web search — with an **adversarial bias**: its job is to try to prove the article wrong, not confirm it's right. It actively searches for disconfirming/debunking coverage in addition to corroborating sources, rather than stopping at the first source that agrees. Priority check: confirms the current title and status of every named political figure, head of state, and official — "former" applied to a sitting official is a broadcast-level error. Produces a Fact Check Report with three sections — **Verified**, **Unverified**, and **Corrections Needed** — and issues one of three verdicts:
 - `CLEAR TO PUBLISH` — all significant claims verified
 - `PUBLISH WITH NOTES` — minor unverified items, no outright errors
 - `HOLD FOR CORRECTIONS` — factual errors found, must be fixed before publishing
 
 ### Editor
 Receives the draft article and the Fact Check Report. Applies every correction listed under Corrections Needed — uses web search to confirm accurate information before making each change. Particular focus on current vs. former titles for political figures and officials. Outputs the complete corrected article plus an editorial note listing every change made. The Script Writer uses this corrected article, not the original draft.
+
+**Self-correction loop:** the Executive Producer reads the Fact Checker's verdict. If it comes back `HOLD FOR CORRECTIONS` (or errors/is unparseable), the EP doesn't just trust the Editor's one-shot patch — it re-runs the Fact Checker against the corrected article to verify the correction actually worked, for up to 2 total fact-check passes. If it's still failing after that, the pipeline **halts before script/video/publish** and the run is logged to the human review queue (see below) instead of publishing an uncorrected story.
 
 ### Script Writer
 Converts the editor-reviewed article into a spoken broadcast anchor script. Formats it for on-air delivery: natural spoken English, breath-pause markers, and `[GRAPHIC: ...]` cues for supporting visuals. Places `[BROLL: url | description]` markers for still images and `[BROLL: url | description | video]` markers for video clips — B-roll markers must appear at the very start of each new story segment so the visual switches the instant the topic changes. Uses the selected anchor's name in the sign-off. Target read time scales with the requested duration. Saves to `./output/{show_slug}/{run_id}/scripts/`.
@@ -256,11 +274,24 @@ Takes the broadcast script, applies TTS text normalisation (see below), strips f
 ### Video Editor
 Downloads the completed anchor video from HeyGen, extracts all `[GRAPHIC: ...]` cues from the script, and assembles a `video_package.json` in `./output/{show_slug}/{run_id}/media/` containing the video file path, thumbnail URL, graphic cues, and suggested YouTube metadata.
 
+### Compliance Checker
+The last gate before publish, for `BROADCAST_VIDEO`, `VIDEO_FROM_SCRIPT`, and `SPECIAL_REPORT` workflows only. Screens the final broadcast script for content that could violate YouTube's Community Guidelines — graphic violence, hate speech, harassment of private individuals, promotion of dangerous acts, sexual content, and policy-sensitive misinformation (elections, medical claims) — without re-litigating factual accuracy, which is the Fact Checker's job. Issues one of two verdicts: `CLEAR TO PUBLISH` or `HOLD FOR REVIEW`. Unlike the fact-check loop, there's **no retry** here — a policy concern usually isn't something an automated rewrite can reliably fix, so a `HOLD` halts the pipeline immediately and logs to the human review queue.
+
 ### Producer
 Confirms all output files are saved and compiles a final production summary — article path, script path, video path, topic, and word counts.
 
 ### Publisher
 Reads `video_package.json` and uploads the finished MP4 to YouTube. The title is the story subject only — newsroom name and show-type prefixes ("Defy Logic News | Morning Report | …", "Breaking News: …", etc.) are stripped, leaving just the headline. Sets the HeyGen thumbnail. Adds the video to the appropriate YouTube playlists (see Playlists below). Uploads exactly once in native Python. Returns the final YouTube URL.
+
+---
+
+## Human Review Queue
+
+When either the fact-check retry loop or the Compliance Checker halts a production, it's logged to `./output/needs_review.json` (`tools/review_queue.py`) instead of silently failing or publishing anyway — a flat, append-only log in the same style as `story_history.json` and `breaking_news_log.json`, capped at 200 entries. Each entry records the topic, the reason, which stage halted it (`fact_check` or `compliance`), the run's output directory (so you can read the full article/script/fact-check report), and the workflow.
+
+A halted run is also reported back as `"success": false` from the Executive Producer, and `/produce/async` marks the job `status: "error"` accordingly — so a caller (Jarvis) polling `/job/{job_id}` can tell a halt apart from a normal completion, rather than seeing a silent "complete" with no video.
+
+There's no UI for this yet — check the file directly, or call `tools.review_queue.list_pending()`.
 
 ---
 
@@ -303,11 +334,13 @@ To add a new rule, append a tuple to `_TTS_REPLACEMENTS` at the top of `tools/he
 |----------|----------------|-------|
 | `RESEARCH_ONLY` | "research", "find information about", "what do we know about" | Researcher |
 | `ARTICLE` | "write an article", "write a story", "cover this story" | Researcher → Writer → Fact Checker → Editor → Producer |
-| `FULL_PRODUCTION` | "full production", "produce a segment", "news segment", "broadcast" | Researcher → Writer → Fact Checker → Script Writer → Producer *(no video)* |
-| `BROADCAST_VIDEO` | "video", "youtube", "record", "generate video", "broadcast video", "publish" | Researcher → Writer → Fact Checker → Script Writer → Anchor → Video Editor → Producer → Publisher |
+| `FULL_PRODUCTION` | "full production", "produce a segment", "news segment", "broadcast" | Researcher → Writer → Fact Checker → Editor → Script Writer → Producer *(no video)* |
+| `BROADCAST_VIDEO` | "video", "youtube", "record", "generate video", "broadcast video", "publish" | Researcher → Writer → Fact Checker → Editor → Script Writer → Anchor → Video Editor → Compliance Checker → Producer → Publisher |
 | `SPECIAL_REPORT` | "special report", "deep dive", "in-depth", "long-form", "comprehensive coverage" | Same steps as BROADCAST_VIDEO with extended research, long-form writing, and full-duration scripting |
 | `SCRIPT_ONLY` | "script only", "write a script", "turn this into a script" (with content) | Script Writer → Producer |
-| `VIDEO_FROM_SCRIPT` | "video from script", "record this script", "generate video from script" | Anchor → Video Editor → Producer → Publisher |
+| `VIDEO_FROM_SCRIPT` | "video from script", "record this script", "generate video from script" | Anchor → Video Editor → Compliance Checker → Producer → Publisher |
+
+The Fact Checker's `HOLD FOR CORRECTIONS` verdict can re-run Fact Checker → Editor as a bounded self-correction pass (see [Human Review Queue](#human-review-queue)), and the Compliance Checker's `HOLD FOR REVIEW` halts before Producer/Publisher — so the step list above is what runs on the clean path, not a strict guarantee of what runs on every request.
 
 > **Note:** `FULL_PRODUCTION` produces a script but **no video**. Use `BROADCAST_VIDEO` (or say "broadcast video", "generate a video", "publish") to get a HeyGen render and YouTube upload.
 
@@ -327,17 +360,20 @@ Each step receives the full output of all prior steps as context.
 ## Architecture
 
 ```
-Jarvis (or any HTTP client)
- └─► POST /produce/async
+Jarvis (or any HTTP client)              External event feeds
+ └─► POST /produce/async                  └─► POST /webhook/ingest
+       │                                        └─► Breaking News Checker
+       │                                              (same gates as the 30-min poll)
        └─► Executive Producer (orchestrator)
              ├─► Breaking News Checker  — background monitor (Jarvis scheduler)
              ├─► Researcher      — web_research_tool, file_operations_tool
              ├─► Writer          — file_operations_tool
-             ├─► Fact Checker    — web_research_tool
+             ├─► Fact Checker    — web_research_tool (adversarial; can re-run after Editor)
              ├─► Editor          — web_research_tool, file_operations_tool
              ├─► Script Writer   — file_operations_tool
              ├─► Anchor          — HeyGen API (generate + native async poll)
              ├─► Video Editor    — video_tools (download, extract cues, package)
+             ├─► Compliance Checker — policy screen; halts to review queue on HOLD
              ├─► Producer        — file_operations_tool
              └─► Publisher       — YouTube API (upload once + thumbnail)
 ```
@@ -353,6 +389,7 @@ output/
       production_logs/  — full production logs with all agent outputs (.md)
   breaking_news_log.json  — breaking news coverage log (72-hour dedup window)
   story_history.json      — universal story log for EP dedup (7-day window)
+  needs_review.json       — productions halted for human review (fact-check/compliance)
   last_broadcast.json     — timestamp of the most recent completed production
 ```
 
@@ -456,6 +493,27 @@ LOGS_DIR=./output/production_logs
 YOUTUBE_CLIENT_SECRETS_PATH=credentials/youtube_client_secrets.json
 ```
 
+### Per-Agent Model Configuration
+
+Every agent's model is resolved through `settings.model_for(role)` (`config/settings.py`), which defaults every role to `gpt-4o` but can be overridden independently per agent via env vars — useful for putting a stronger reasoning model on verification-heavy roles (Fact Checker, Compliance Checker) without paying for it on routine drafting roles:
+
+```env
+MODEL_EXECUTIVE_PRODUCER=gpt-4o
+MODEL_RESEARCHER=gpt-4o
+MODEL_WRITER=gpt-4o
+MODEL_FACT_CHECKER=gpt-4o
+MODEL_EDITOR=gpt-4o
+MODEL_SCRIPT_WRITER=gpt-4o
+MODEL_ANCHOR=gpt-4o
+MODEL_VIDEO_EDITOR=gpt-4o
+MODEL_PRODUCER=gpt-4o
+MODEL_PUBLISHER=gpt-4o
+MODEL_BREAKING_NEWS_CHECKER=gpt-4o
+MODEL_COMPLIANCE_CHECKER=gpt-4o
+```
+
+Unset vars fall back to `gpt-4o`; no code changes needed to swap models.
+
 ---
 
 ## Running
@@ -479,6 +537,7 @@ Server starts at `http://0.0.0.0:8091`.
 | `/produce/async` | POST | Start a production in the background — returns `job_id` immediately |
 | `/job/{job_id}` | GET | Poll for the status and result of an async production job |
 | `/produce/stream` | POST | Run a production via SSE (streams status updates) |
+| `/webhook/ingest` | POST | Push a normalized external event (earthquake/weather/market-data feed, RSS bridge, etc.) through the same breaking-news qualifying-criteria and dedup/cooldown gates as the scheduled poll |
 | `/docs` | GET | Swagger UI |
 
 ### Request format
@@ -532,3 +591,16 @@ curl -X POST http://localhost:8091/produce/async \
   -H "Content-Type: application/json" \
   -d '{"request": "Write a news article about the Strait of Hormuz shipping situation"}'
 ```
+
+---
+
+## Testing
+
+`tests/` is a `pytest` suite covering the Executive Producer's orchestration logic — self-correction routing/retries, the compliance gate, the human review queue, the webhook endpoint, and the success/error status surfaced to callers. Everything in it is mocked (no live LLM/API calls, no cost, safe to run anytime):
+
+```bash
+pip install pytest pytest-asyncio
+pytest
+```
+
+`test_tools.py` is separate and different in kind — a manual smoke test (`python test_tools.py`) that makes real calls against every configured API (OpenAI, Tavily, Pixabay, HeyGen, YouTube) to confirm credentials and connectivity. Run it deliberately, not as part of routine iteration.

@@ -79,7 +79,7 @@ class Agent(BaseAgent):
     """Fact Checker — runs Tavily title verification before LLM review of the article."""
 
     def __init__(self):
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0.0, openai_api_key=settings.OPENAI_API_KEY)
+        self.llm = ChatOpenAI(model=settings.model_for("fact_checker"), temperature=0.0, openai_api_key=settings.OPENAI_API_KEY)
         self.tools = [web_research_tool]
         prompt = ChatPromptTemplate.from_messages([
             ("system", FACT_CHECKER_PROMPT),

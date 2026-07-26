@@ -21,7 +21,9 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from agents.registry import BaseAgent, AgentInfo
-from agents.breaking_news_checker.prompts import BREAKING_NEWS_SYSTEM_PROMPT, BREAKING_NEWS_EVAL_PROMPT
+from agents.breaking_news_checker.prompts import (
+    BREAKING_NEWS_SYSTEM_PROMPT, BREAKING_NEWS_EVAL_PROMPT, WEBHOOK_EVENT_EVAL_PROMPT,
+)
 from config.settings import settings
 from tools.breaking_news_log import get_recent_for_dedup, within_cooldown, record
 
@@ -36,7 +38,7 @@ class Agent(BaseAgent):
 
     def __init__(self):
         self.llm = ChatOpenAI(
-            model="gpt-4o",
+            model=settings.model_for("breaking_news_checker"),
             temperature=0.1,
             openai_api_key=settings.OPENAI_API_KEY,
         )
@@ -165,6 +167,77 @@ class Agent(BaseAgent):
                 "breaking_news_found": False,
             }
 
+        return await self._evaluate_and_maybe_fire(parsed)
+
+    async def process_webhook_event(
+        self,
+        source: str,
+        headline: str,
+        detail: str = "",
+        url: str = "",
+        keywords: list[str] | None = None,
+    ) -> dict:
+        """
+        Evaluate a single normalized event pushed from an external feed (earthquake sensor,
+        weather alert, market-data spike, RSS-to-webhook bridge, etc.) — entry point for
+        POST /webhook/ingest. Runs the same qualifying-criteria LLM judgment and dedup/cooldown
+        gates as the headline-scan path in process_message, then fires a production if it
+        clears the bar. See SELF_IMPROVEMENT_ROADMAP.md Phase 5.
+        """
+        logger.info(f"[breaking_news] Webhook event from {source}: {headline[:120]}")
+
+        if within_cooldown():
+            logger.info("[breaking_news] Within cooldown window — skipping webhook event")
+            return {
+                "success": True,
+                "response": "Webhook event skipped — within 30-minute cooldown from a recent production.",
+                "agent": "breaking_news_checker",
+                "breaking_news_found": False,
+            }
+
+        recent_entries = get_recent_for_dedup()
+        recent_log_text = self._format_recent_log(recent_entries)
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+        try:
+            response = await self.llm.ainvoke([
+                SystemMessage(content=BREAKING_NEWS_SYSTEM_PROMPT),
+                HumanMessage(content=WEBHOOK_EVENT_EVAL_PROMPT.format(
+                    current_datetime=now_str,
+                    source=source,
+                    headline=headline,
+                    detail=detail or "(none provided)",
+                    url=url or "(none provided)",
+                    recent_log=recent_log_text,
+                )),
+            ])
+            content = response.content.strip()
+            content = re.sub(r"^```(?:json)?\s*", "", content)
+            content = re.sub(r"\s*```$", "", content)
+            parsed = json.loads(content)
+        except Exception as e:
+            logger.error(f"[breaking_news] Webhook LLM evaluation failed: {e}", exc_info=True)
+            return {
+                "success": False,
+                "response": f"Webhook event evaluation error: {e}",
+                "agent": "breaking_news_checker",
+                "breaking_news_found": False,
+            }
+
+        # Prefer the caller-supplied keywords when the LLM didn't extract any of its own —
+        # feed adapters (earthquake/weather/market) usually know good dedup keywords already.
+        if keywords and not parsed.get("keywords"):
+            parsed["keywords"] = keywords
+
+        return await self._evaluate_and_maybe_fire(parsed)
+
+    async def _evaluate_and_maybe_fire(self, parsed: dict) -> dict:
+        """
+        Shared suppression/fire logic for both the headline-scan and webhook-event paths.
+        `parsed` must have the shape produced by BREAKING_NEWS_EVAL_PROMPT /
+        WEBHOOK_EVENT_EVAL_PROMPT: breaking_news_found, confidence, topic, headline, reason,
+        keywords, production_message.
+        """
         breaking_found = parsed.get("breaking_news_found", False)
         confidence   = parsed.get("confidence", "low").lower()
         topic        = parsed.get("topic", "")

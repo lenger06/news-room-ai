@@ -77,12 +77,26 @@ class ProductionState(TypedDict):
     dedup_suppressed: bool
     dedup_reason: str
 
+    # Formatted prior-coverage entries (from story_history), surfaced to the writer
+    # for continuity context — set by _dedup_check_node whenever similar stories exist,
+    # independent of the dedup SKIP/PROCEED decision.
+    prior_coverage: str
+
     # Current step tracking
     current_step_index: int
+    last_step_name: str
     anchor_failed: bool
     researcher_failed: bool
     error: Optional[str]
     final_summary: str
+
+    # Self-correction loop state (see _route_after_step)
+    fact_check_verdict: str
+    fact_check_attempts: int
+    compliance_verdict: str
+    needs_human_review: bool
+    human_review_reason: str
+    review_stage: str
 
 
 class Agent(BaseAgent):
@@ -92,15 +106,22 @@ class Agent(BaseAgent):
         "RESEARCH_ONLY":    ["researcher"],
         "ARTICLE":          ["researcher", "writer", "fact_checker", "editor", "producer"],
         "FULL_PRODUCTION":  ["researcher", "writer", "fact_checker", "editor", "script_writer", "producer"],
-        "BROADCAST_VIDEO":  ["researcher", "writer", "fact_checker", "editor", "script_writer", "anchor", "video_editor", "producer", "publisher"],
+        "BROADCAST_VIDEO":  ["researcher", "writer", "fact_checker", "editor", "script_writer", "anchor", "video_editor", "compliance_checker", "producer", "publisher"],
         "SCRIPT_ONLY":      ["script_writer", "producer"],
-        "VIDEO_FROM_SCRIPT":["anchor", "video_editor", "producer", "publisher"],
-        "SPECIAL_REPORT":   ["researcher", "writer", "fact_checker", "editor", "script_writer", "anchor", "video_editor", "producer", "publisher"],
+        "VIDEO_FROM_SCRIPT":["anchor", "video_editor", "compliance_checker", "producer", "publisher"],
+        "SPECIAL_REPORT":   ["researcher", "writer", "fact_checker", "editor", "script_writer", "anchor", "video_editor", "compliance_checker", "producer", "publisher"],
     }
+
+    # Self-correction loop (see _route_after_step): how many total fact_checker passes
+    # to allow (initial check + re-verifications after editor corrections) before
+    # giving up and halting the pipeline for human review instead of publishing.
+    MAX_FACT_CHECK_ATTEMPTS = 2
+    _FAILING_FACT_CHECK_VERDICTS = {"HOLD FOR CORRECTIONS", "ERROR", "UNKNOWN"}
+    _FAILING_COMPLIANCE_VERDICTS = {"HOLD FOR REVIEW", "ERROR", "UNKNOWN"}
 
     def __init__(self):
         self.llm = ChatOpenAI(
-            model="gpt-4o",
+            model=settings.model_for("executive_producer"),
             temperature=0.1,
             openai_api_key=settings.OPENAI_API_KEY,
         )
@@ -320,6 +341,7 @@ class Agent(BaseAgent):
 
         state["dedup_suppressed"] = False
         state["dedup_reason"] = ""
+        state["prior_coverage"] = ""
 
         workflow = state.get("workflow", "")
         # Dedup only applies to workflows that produce original researched content
@@ -342,6 +364,9 @@ class Agent(BaseAgent):
             return state
 
         recent_text = format_for_llm(similar[:10])
+        # Surface to the writer for continuity ("as we reported last Tuesday") regardless
+        # of the SKIP/PROCEED decision below — this is prior-coverage context, not a dedup gate.
+        state["prior_coverage"] = format_for_llm(similar[:5])
         logger.info(f"[EP] Dedup: found {len(similar)} similar story/stories in history — evaluating")
 
         try:
@@ -441,6 +466,13 @@ class Agent(BaseAgent):
                 )
 
             if agent_name == "writer":
+                if state.get("prior_coverage"):
+                    step_input += (
+                        "\n\nPRIOR COVERAGE (from our own recent reporting — for continuity only, "
+                        "e.g. \"as we reported earlier this week\"; do not treat this as a fact "
+                        "source for the current story, and do not re-report old details as new):\n"
+                        f"{state['prior_coverage']}"
+                    )
                 target_dur = state.get("target_duration_seconds")
                 if target_dur:
                     target_words = round(target_dur * 150 / 60)
@@ -556,6 +588,21 @@ class Agent(BaseAgent):
             outputs[agent_name] = anchor_output
             state["outputs"] = outputs
 
+            # Capture fact-checker verdict for the self-correction routing in _route_after_step.
+            if agent_name == "fact_checker":
+                verdict = result.get("verdict", "UNKNOWN")
+                state["fact_check_verdict"] = verdict
+                state["fact_check_attempts"] = state.get("fact_check_attempts", 0) + 1
+                logger.info(
+                    f"[EP] Fact-check attempt {state['fact_check_attempts']}: verdict={verdict}"
+                )
+
+            # Capture compliance verdict for the publish gate in _route_after_step.
+            if agent_name == "compliance_checker":
+                verdict = result.get("verdict", "UNKNOWN")
+                state["compliance_verdict"] = verdict
+                logger.info(f"[EP] Compliance verdict: {verdict}")
+
             # Guard: abort if researcher returned failure/empty content instead of real research.
             if agent_name == "researcher":
                 _failure_phrases = [
@@ -607,10 +654,54 @@ class Agent(BaseAgent):
                 state["anchor_failed"] = True
 
         state["current_step_index"] = idx + 1
+        state["last_step_name"] = agent_name
         return state
 
     def _route_after_step(self, state: ProductionState) -> str:
         idx = state.get("current_step_index", 0)
+
+        # Self-correction loop: after editor patches a failing fact-check, re-verify with
+        # fact_checker instead of trusting the one-shot correction blindly. Bounded by
+        # MAX_FACT_CHECK_ATTEMPTS total fact-check passes; if still failing after that many,
+        # halt before script/video/publish steps and route to human review instead of
+        # guessing further or publishing an uncorrected story.
+        if (
+            state.get("last_step_name") == "editor"
+            and state.get("fact_check_verdict") in self._FAILING_FACT_CHECK_VERDICTS
+        ):
+            attempts = state.get("fact_check_attempts", 0)
+            if attempts < self.MAX_FACT_CHECK_ATTEMPTS:
+                state["steps"] = state["steps"][:idx] + ["fact_checker", "editor"] + state["steps"][idx:]
+                logger.info(
+                    f"[EP] Re-verifying after correction (fact-check attempt {attempts + 1}/"
+                    f"{self.MAX_FACT_CHECK_ATTEMPTS})"
+                )
+            else:
+                state["needs_human_review"] = True
+                state["review_stage"] = "fact_check"
+                state["human_review_reason"] = (
+                    f"Fact-checker still returned '{state['fact_check_verdict']}' after "
+                    f"{attempts} attempt(s) and correction pass(es) — halting before "
+                    f"script/video/publish steps."
+                )
+                logger.warning(f"[EP] {state['human_review_reason']}")
+                return "done"
+
+        # Compliance gate: unlike fact-check corrections, policy concerns aren't something
+        # an automatic rewrite pass can reliably fix, so there's no retry loop here — a
+        # HOLD verdict halts immediately, before the publish step, for a human look.
+        if (
+            state.get("last_step_name") == "compliance_checker"
+            and state.get("compliance_verdict") in self._FAILING_COMPLIANCE_VERDICTS
+        ):
+            state["needs_human_review"] = True
+            state["review_stage"] = "compliance"
+            state["human_review_reason"] = (
+                f"Compliance check returned '{state['compliance_verdict']}' — halting before publish."
+            )
+            logger.warning(f"[EP] {state['human_review_reason']}")
+            return "done"
+
         if idx >= len(state["steps"]):
             return "done"
         if state.get("researcher_failed") or state.get("anchor_failed"):
@@ -659,6 +750,12 @@ class Agent(BaseAgent):
 
         if state.get("researcher_failed"):
             lines.append(f"🛑 PRODUCTION ABORTED — Researcher returned no usable content. {state.get('error', '')}")
+        elif state.get("needs_human_review"):
+            lines.append(
+                f"🛑 HALTED FOR HUMAN REVIEW — {state.get('human_review_reason', '')} "
+                f"No script/video/publish steps were run. Review the article and fact-check "
+                f"notes above (or in this run's production log) before manually resuming."
+            )
         elif state.get("error"):
             lines.append(f"⚠️ One or more steps encountered an error: {state['error']}")
 
@@ -711,9 +808,25 @@ class Agent(BaseAgent):
         except Exception as e:
             logger.warning(f"[EP] Could not save last_broadcast.json: {e}")
 
+        # Record to the human-review queue so halted productions are discoverable
+        # without scanning every run's production log individually.
+        if state.get("needs_human_review"):
+            try:
+                from tools.review_queue import record as _review_record
+                _review_record(
+                    topic=state.get("topic", ""),
+                    reason=state.get("human_review_reason", ""),
+                    stage=state.get("review_stage", "unknown"),
+                    output_dir=state.get("output_dir", ""),
+                    workflow=state.get("workflow", ""),
+                )
+            except Exception as e:
+                logger.warning(f"[EP] Could not record to review queue: {e}")
+
         # Record to story_history so future productions can dedup against this one.
-        # Skip if researcher or anchor failed (no usable content was produced).
-        if not state.get("researcher_failed") and not state.get("anchor_failed"):
+        # Skip if researcher/anchor failed or the piece was halted for human review —
+        # none of these produced usable/publishable content.
+        if not state.get("researcher_failed") and not state.get("anchor_failed") and not state.get("needs_human_review"):
             try:
                 from tools.story_history import record as _sh_record
                 _sh_record(
@@ -763,15 +876,32 @@ class Agent(BaseAgent):
                 "keywords": [],
                 "dedup_suppressed": False,
                 "dedup_reason": "",
+                "prior_coverage": "",
                 "current_step_index": 0,
+                "last_step_name": "",
                 "anchor_failed": False,
                 "researcher_failed": False,
                 "error": None,
                 "final_summary": "",
+                "fact_check_verdict": "",
+                "fact_check_attempts": 0,
+                "compliance_verdict": "",
+                "needs_human_review": False,
+                "human_review_reason": "",
+                "review_stage": "",
             }
             final_state = await self.workflow.ainvoke(initial_state)
+            # dedup_suppressed is an intentional no-op (story already covered), not a
+            # failure. researcher_failed/anchor_failed/needs_human_review all mean no
+            # publishable output was produced — callers (Jarvis) need to see that as a
+            # failure, not a silent "complete", or a halted production goes unnoticed.
+            succeeded = not (
+                final_state.get("researcher_failed")
+                or final_state.get("anchor_failed")
+                or final_state.get("needs_human_review")
+            )
             return {
-                "success": True,
+                "success": succeeded,
                 "response": final_state["final_summary"],
                 "agent": "executive_producer",
                 "workflow": final_state.get("workflow"),

@@ -40,7 +40,7 @@ class AgentRegistry:
             version="1.0.0",
             module_path="agents.executive_producer.agent",
             parent_agent=None,
-            manages_agents=["researcher", "writer", "fact_checker", "editor", "script_writer", "anchor", "video_editor", "producer", "publisher"],
+            manages_agents=["researcher", "writer", "fact_checker", "editor", "script_writer", "anchor", "video_editor", "compliance_checker", "producer", "publisher"],
         ))
         self.register_agent(AgentInfo(
             name="researcher",
@@ -104,6 +104,14 @@ class AgentRegistry:
             description="Confirms output files and compiles production summary",
             version="1.0.0",
             module_path="agents.producer.agent",
+            parent_agent="executive_producer",
+        ))
+        self.register_agent(AgentInfo(
+            name="compliance_checker",
+            display_name="Compliance Checker",
+            description="Screens the final broadcast script for YouTube policy risk before publish",
+            version="1.0.0",
+            module_path="agents.compliance_checker.agent",
             parent_agent="executive_producer",
         ))
         self.register_agent(AgentInfo(

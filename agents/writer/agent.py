@@ -21,7 +21,7 @@ class Agent(BaseAgent):
     """Writer — produces a polished news article from research material."""
 
     def __init__(self):
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0.3, openai_api_key=settings.OPENAI_API_KEY)
+        self.llm = ChatOpenAI(model=settings.model_for("writer"), temperature=0.3, openai_api_key=settings.OPENAI_API_KEY)
         self.tools = [file_operations_tool]
         prompt = ChatPromptTemplate.from_messages([
             ("system", WRITER_PROMPT),

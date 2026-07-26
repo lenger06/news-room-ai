@@ -21,7 +21,7 @@ class Agent(BaseAgent):
     """Producer — final production step: file management and (future) YouTube upload."""
 
     def __init__(self):
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
+        self.llm = ChatOpenAI(model=settings.model_for("producer"), temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
         self.tools = [file_operations_tool]
         prompt = ChatPromptTemplate.from_messages([
             ("system", PRODUCER_PROMPT),

@@ -31,7 +31,18 @@ def _get_youtube_service():
 
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
+                try:
+                    creds.refresh(Request())
+                except Exception as refresh_err:
+                    logger.error(
+                        "[youtube_auth] Refresh token invalid or revoked — publishing is broken "
+                        f"until this is fixed manually. Detail: {refresh_err}"
+                    )
+                    raise RuntimeError(
+                        "YOUTUBE AUTH EXPIRED: refresh token invalid or revoked. "
+                        "Run `python recreate_tokens.py` to re-authenticate, then retry publishing. "
+                        f"(underlying error: {refresh_err})"
+                    ) from refresh_err
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(
                     settings.YOUTUBE_CLIENT_SECRETS_PATH, SCOPES

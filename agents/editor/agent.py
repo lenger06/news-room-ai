@@ -94,7 +94,7 @@ class Agent(BaseAgent):
     """Editor — verifies titles via Tavily, applies fact-check corrections, produces clean article."""
 
     def __init__(self):
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
+        self.llm = ChatOpenAI(model=settings.model_for("editor"), temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
         self.tools = [web_research_tool, file_operations_tool]
         prompt = ChatPromptTemplate.from_messages([
             ("system", EDITOR_PROMPT),
