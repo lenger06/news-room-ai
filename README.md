@@ -244,6 +244,18 @@ Examples:
 
 The story history is persisted to `./output/story_history.json`. The dedup gate is bypassed automatically for `RESEARCH_ONLY`, `SCRIPT_ONLY`, and `VIDEO_FROM_SCRIPT` workflows (these don't produce new researched broadcast content).
 
+### Story Dossiers
+
+Separate from the dedup log — `story_history.json` only tracks *that* a topic was covered, not *what's actually known about it*. `tools/dossiers.py` maintains an evolving per-thread markdown file for ongoing stories ("Iran/Hormuz shipping", "a developing earthquake response"), matched or created by the same 2+ keyword-overlap convention used elsewhere:
+
+1. During the dedup check, the EP looks for an existing dossier sharing 2+ keywords with the current story (read-only — no new dossier is created for a story that turns out to be `SKIP`ped as a duplicate).
+2. If found, its content is injected into the Researcher's and Writer's step input as a `STORY DOSSIER` block — accumulated context to understand what's already established and focus on what's new, not a fact source for the current story.
+3. After a production completes successfully, a short lead-paragraph summary (no extra LLM call — a cheap heuristic snippet of the article) is appended as a new dated section, and the dossier is matched-or-created at this point if it didn't already exist.
+
+Dossiers live in `./output/dossiers/{slug}.md`, indexed in `./output/dossiers/_index.json`. Both entry count per dossier (30) and total dossier count (150, pruning the least-recently-updated) are capped, matching the bounded-log convention used by `story_history.json` and `breaking_news_log.json`.
+
+This is a deliberately cheaper alternative to a vector database — see `SELF_IMPROVEMENT_ROADMAP.md` Phase 4 for why.
+
 ### Researcher
 Gathers source material using real-time web search (Tavily). Searches for multiple angles — latest developments, background context, key figures, and statistics. Compiles a sourced research brief with URLs. Also sources b-roll media: still images via Tavily and short video clips via the Pixabay API (if configured). Outputs a `## SOURCED B-ROLL IMAGES` and `## SOURCED B-ROLL VIDEOS` section for the script writer to choose from.
 
@@ -255,7 +267,12 @@ Receives the research brief and writes a polished news article. Standard product
 In Special Report mode: writes a long-form analytical piece structured as Executive Summary → Background & Context → Key Developments → Multiple Perspectives & Expert Analysis → Implications & What's Next → Conclusion. May add explanatory context and analytical commentary beyond the raw research facts to fill the target word count.
 
 ### Fact Checker
-Reads the draft article and verifies key factual claims using web search — with an **adversarial bias**: its job is to try to prove the article wrong, not confirm it's right. It actively searches for disconfirming/debunking coverage in addition to corroborating sources, rather than stopping at the first source that agrees. Priority check: confirms the current title and status of every named political figure, head of state, and official — "former" applied to a sitting official is a broadcast-level error. Produces a Fact Check Report with three sections — **Verified**, **Unverified**, and **Corrections Needed** — and issues one of three verdicts:
+Reads the draft article and verifies key factual claims using web search — with an **adversarial bias**: its job is to try to prove the article wrong, not confirm it's right. It actively searches for disconfirming/debunking coverage in addition to corroborating sources, rather than stopping at the first source that agrees. Three categories get a **deterministic Tavily pre-run** before the LLM even starts (guaranteeing a baseline of independent corroboration rather than leaving it to the LLM's own discretion which claims to check):
+- Named officials/titles — "former" applied to a sitting official is a broadcast-level error
+- Direct quotes — a misattributed or fabricated quote is a broadcast-level error independent of the surrounding facts
+- Statistics and casualty figures — extracted with their containing sentence for a meaningful search query, not just the bare number
+
+Produces a Fact Check Report with three sections — **Verified**, **Unverified**, and **Corrections Needed** — and issues one of three verdicts:
 - `CLEAR TO PUBLISH` — all significant claims verified
 - `PUBLISH WITH NOTES` — minor unverified items, no outright errors
 - `HOLD FOR CORRECTIONS` — factual errors found, must be fixed before publishing

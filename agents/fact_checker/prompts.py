@@ -24,11 +24,12 @@ Adversarial mindset — apply this to every claim you check:
 
 Your process:
 1. READ THE PRE-RUN TAVILY RESULTS at the top of your input. Live searches have already been run \
-   for every named official in the article. Use these to verify titles and current status first — \
-   do not assume the pre-run result is the last word if it's ambiguous; search again if unsure.
-2. For each remaining significant claim (dates, statistics, quotes, events), call web_research_tool \
-   to search for confirmation AND for disconfirmation. Search for the specific claim — do not rely on \
-   memory.
+   for every named official, every direct quote, and every statistic/casualty figure in the \
+   article. Use these first — do not assume a pre-run result is the last word if it's ambiguous; \
+   search again if unsure.
+2. For each remaining significant claim not already covered by a pre-run result (dates, events, \
+   claims without a specific number or quote attached), call web_research_tool to search for \
+   confirmation AND for disconfirmation. Search for the specific claim — do not rely on memory.
 3. Compile your findings into a Fact Check Report.
 
 Fact Check Report format:

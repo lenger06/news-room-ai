@@ -97,14 +97,24 @@ worth building that queue mechanism once and reusing it here.
 
 ---
 
-## Phase 3 — Deeper adversarial verification
+## Phase 3 — Deeper adversarial verification — DONE (2026-07-25)
 
 Builds on Phase 0's model tiering and Phase 0.2's prompt change.
 
-- Fact-checker currently only cross-checks named officials/titles and
+- ~~Fact-checker currently only cross-checks named officials/titles and
   "significant claims" narrowly (regex-extracted). Expand scope to require
   independent corroboration for every major factual assertion, not just
-  names/titles.
+  names/titles.~~ Done: `agents/fact_checker/agent.py` now also deterministically
+  pre-runs Tavily searches for direct quotes (`_extract_quotes`) and
+  statistics/casualty figures with their containing sentence
+  (`_extract_statistic_sentences`), on top of the existing named-officials
+  check — same "Python pre-run + LLM does the rest" pattern, not left to the
+  LLM's own discretion which claims to check. Covered by
+  `tests/test_fact_checker_extraction.py`.
+- Note: this increases Tavily call volume per fact-check run (up to 8 official
+  + 5 quote + 6 statistic pre-run searches, plus whatever the LLM agent does
+  on top) — real cost/latency tradeoff for the added corroboration coverage,
+  worth watching in practice.
 - Research and fact-checking both currently rely on a single provider
   (Tavily) for text search. If corroboration quality becomes a real problem,
   consider adding a second independent search provider so "cross-referencing"
@@ -114,23 +124,27 @@ Builds on Phase 0's model tiering and Phase 0.2's prompt change.
 
 ---
 
-## Phase 4 — Real memory / continuity
+## Phase 4 — Real memory / continuity — dossier version DONE (2026-07-25)
 
 `story_history.py` and `breaking_news_log.py` are flat JSON logs matched by
 keyword-set overlap — fine for dedup, not a knowledge store.
 
-- Once Phase 0.3 (surfacing history to the writer) is in place and you've
-  seen it in action, evaluate whether keyword-overlap matching is actually
-  the bottleneck before reaching for a vector DB. It may well be sufficient
-  at your current story volume.
-- If precision genuinely becomes a problem, the incremental upgrade is
-  embedding story summaries (not full articles) and doing similarity search
-  over that — small addition, not a new subsystem.
-- Separately, consider "evolving dossier" files per ongoing story/key figure
-  (e.g. `dossiers/iran_hormuz.md`) that get appended to over time and are
-  explicitly loaded into the researcher/writer context for stories tagged to
-  that thread. This is closer to what real newsrooms do than generic vector
-  recall, and is much cheaper to build.
+- ~~Consider "evolving dossier" files per ongoing story/key figure~~ Done:
+  `tools/dossiers.py` maintains a markdown file per story thread
+  (`./output/dossiers/{slug}.md`), matched/created by the same 2+
+  keyword-overlap convention as `story_history.find_similar`. The EP looks up
+  a match (read-only) during the dedup-check node and injects it into
+  Researcher/Writer step input as a `STORY DOSSIER` block; a short
+  lead-paragraph summary (cheap heuristic, no extra LLM call) is appended
+  after a successful run. Entry count per dossier (30) and total dossier
+  count (150, LRU-pruned) are both capped. Covered by `tests/test_dossiers.py`
+  and `tests/test_ep_dossiers.py`.
+- Embeddings/vector DB explicitly **not built** — per the original plan here,
+  evaluate whether the dossier + keyword-overlap combination is actually
+  insufficient in practice before reaching for that. If precision genuinely
+  becomes a problem later, the incremental upgrade is embedding story
+  summaries (not full articles) for similarity search — small addition, not
+  a new subsystem.
 
 ---
 

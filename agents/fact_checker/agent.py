@@ -32,6 +32,45 @@ _OFFICIAL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Direct quoted statements — a misattributed or fabricated quote is a broadcast-level
+# error independent of whether the surrounding facts check out.
+_QUOTE_RE = re.compile(r'"([^"\n]{15,280})"')
+
+# Statistics / casualty figures — a number paired with a unit or outcome keyword that
+# makes it an independently checkable claim (e.g. "12 percent", "3 million displaced").
+# Units are usually adjacent to the number ("12 percent"); casualty outcomes are usually
+# a few words later ("40 people were killed"), so that pattern allows a short gap.
+_STAT_UNIT_RE = re.compile(
+    r'\b\d[\d,]*(?:\.\d+)?\s?(?:percent|%|million|billion|thousand)\b',
+    re.IGNORECASE,
+)
+_STAT_CASUALTY_RE = re.compile(
+    r'\b\d[\d,]*(?:\.\d+)?\b(?:\s+\S+){0,3}?\s+'
+    r'(?:dead|deaths|killed|injured|wounded|casualties|hospitalized|displaced)\b',
+    re.IGNORECASE,
+)
+
+
+def _sentence_containing(text: str, start: int, end: int) -> str:
+    """Return the full sentence around a regex match span — a much more useful Tavily
+    query than the bare matched substring (e.g. the whole "40 people were killed when..."
+    sentence, not just the fragment "40 killed")."""
+    left = max(text.rfind('.', 0, start), text.rfind('!', 0, start), text.rfind('?', 0, start))
+    left = left + 1 if left != -1 else 0
+    right_candidates = [i for i in (text.find('.', end), text.find('!', end), text.find('?', end)) if i != -1]
+    right = min(right_candidates) + 1 if right_candidates else len(text)
+    return text[left:right].strip()
+
+
+def _extract_quotes(text: str) -> list[str]:
+    return list(dict.fromkeys(m.group(1).strip() for m in _QUOTE_RE.finditer(text) if m.group(1).strip()))
+
+
+def _extract_statistic_sentences(text: str) -> list[str]:
+    matches = list(_STAT_UNIT_RE.finditer(text)) + list(_STAT_CASUALTY_RE.finditer(text))
+    sentences = (_sentence_containing(text, m.start(), m.end()) for m in matches)
+    return list(dict.fromkeys(s for s in sentences if s))
+
 
 def _tavily_search(query: str) -> str:
     """Direct Tavily search — deterministic Python call, not via LLM tool."""
@@ -106,11 +145,17 @@ class Agent(BaseAgent):
             today = date.today().strftime("%B %d, %Y")
             year = date.today().year
 
-            # ── Pre-run Tavily searches for every named official in the article ──
+            # ── Pre-run Tavily searches: named officials, direct quotes, and statistics ──
+            # Deterministic Python-level searches, not left to the LLM's own discretion —
+            # this guarantees a baseline of independent corroboration for the claim types
+            # most likely to contain a broadcast-level error, on top of whatever additional
+            # web_research_tool calls the LLM makes for other claims.
             article_text = _extract_article_text(message)
             officials = list(dict.fromkeys(
                 m.group(0) for m in _OFFICIAL_RE.finditer(article_text)
             ))
+            quotes = _extract_quotes(article_text)
+            stat_sentences = _extract_statistic_sentences(article_text)
 
             preamble_lines = [f"TODAY'S DATE: {today}\n"]
 
@@ -123,13 +168,46 @@ class Agent(BaseAgent):
                     "Use these results in your VERIFIED / CORRECTIONS NEEDED sections.\n"
                 )
                 for ref in officials[:8]:  # cap at 8 to keep input manageable
-                    # Build a search query from the reference
                     query = f"{ref} current role title {year}"
                     logger.info(f"[Fact Checker] Tavily: {query!r}")
                     result = _tavily_search(query)
                     preamble_lines.append(f"ARTICLE SAYS: \"{ref}\"")
                     preamble_lines.append(f"TAVILY RESULT: {result}")
                     preamble_lines.append("")
+
+            if quotes:
+                logger.info(f"[Fact Checker] Pre-running Tavily quote checks for {len(quotes)} quote(s)")
+                preamble_lines.append(
+                    "PRE-RUN TAVILY QUOTE VERIFICATION:\n"
+                    "The following direct quotes appear in the article. Live Tavily searches "
+                    "were run for each to check whether they are accurately reported. A quote "
+                    "with no corroborating result is not automatically false — treat it as "
+                    "unverified rather than assuming fabrication.\n"
+                )
+                for q in quotes[:5]:  # cap at 5 to keep input manageable
+                    query = f"\"{q[:120]}\""
+                    logger.info(f"[Fact Checker] Tavily: {query!r}")
+                    result = _tavily_search(query)
+                    preamble_lines.append(f"ARTICLE QUOTES: \"{q}\"")
+                    preamble_lines.append(f"TAVILY RESULT: {result}")
+                    preamble_lines.append("")
+
+            if stat_sentences:
+                logger.info(f"[Fact Checker] Pre-running Tavily checks for {len(stat_sentences)} statistic(s)")
+                preamble_lines.append(
+                    "PRE-RUN TAVILY STATISTIC VERIFICATION:\n"
+                    "The following statements contain a specific figure. Live Tavily searches "
+                    "were run for each to check the number against current reporting.\n"
+                )
+                for sentence in stat_sentences[:6]:  # cap at 6 to keep input manageable
+                    query = sentence[:150]
+                    logger.info(f"[Fact Checker] Tavily: {query!r}")
+                    result = _tavily_search(query)
+                    preamble_lines.append(f"ARTICLE SAYS: \"{sentence}\"")
+                    preamble_lines.append(f"TAVILY RESULT: {result}")
+                    preamble_lines.append("")
+
+            if officials or quotes or stat_sentences:
                 preamble_lines.append(
                     "Now fact-check the full article using the Tavily results above "
                     "plus any additional web_research_tool calls you need.\n"

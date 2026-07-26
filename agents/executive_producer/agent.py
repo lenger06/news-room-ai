@@ -82,6 +82,11 @@ class ProductionState(TypedDict):
     # independent of the dedup SKIP/PROCEED decision.
     prior_coverage: str
 
+    # Story dossier (see tools/dossiers.py) — an evolving per-thread markdown doc,
+    # matched by keyword overlap in _dedup_check_node and appended to in _summarise_node.
+    dossier_slug: str
+    dossier_context: str
+
     # Current step tracking
     current_step_index: int
     last_step_name: str
@@ -97,6 +102,18 @@ class ProductionState(TypedDict):
     needs_human_review: bool
     human_review_reason: str
     review_stage: str
+
+
+def _dossier_summary_snippet(text: str, max_chars: int = 500) -> str:
+    """Extract a short lead-paragraph summary from an article for a dossier entry —
+    strips the editor's note block if present and caps length. A cheap heuristic, not
+    a dedicated summarization pass, so dossier updates don't cost an extra LLM call."""
+    if not text:
+        return ""
+    body = text.split("## EDITOR'S NOTE")[0].strip()
+    paragraphs = [p.strip() for p in body.split("\n\n") if p.strip()]
+    snippet = "\n\n".join(paragraphs[:2])
+    return snippet[:max_chars].strip()
 
 
 class Agent(BaseAgent):
@@ -336,17 +353,35 @@ class Agent(BaseAgent):
         return state
 
     async def _dedup_check_node(self, state: ProductionState) -> ProductionState:
-        """Check story history to prevent duplicate coverage before the pipeline starts."""
+        """Check story history to prevent duplicate coverage before the pipeline starts,
+        and look up a matching story dossier (see tools/dossiers.py) for continuity context."""
         from tools.story_history import find_similar, format_for_llm
+        from tools.dossiers import find_matching_slug, format_for_prompt
 
         state["dedup_suppressed"] = False
         state["dedup_reason"] = ""
         state["prior_coverage"] = ""
+        state["dossier_slug"] = ""
+        state["dossier_context"] = ""
 
         workflow = state.get("workflow", "")
-        # Dedup only applies to workflows that produce original researched content
+        # Dedup/dossier only applies to workflows that produce original researched content
         if workflow in ("RESEARCH_ONLY", "SCRIPT_ONLY", "VIDEO_FROM_SCRIPT"):
             return state
+
+        # Dossier lookup is read-only here — creation happens in _summarise_node, only for
+        # productions that actually complete, so a SKIPped/suppressed story doesn't register
+        # an empty dossier entry.
+        keywords_for_dossier = state.get("keywords", [])
+        if keywords_for_dossier:
+            try:
+                slug = find_matching_slug(keywords_for_dossier)
+                if slug:
+                    state["dossier_slug"] = slug
+                    state["dossier_context"] = format_for_prompt(slug)
+                    logger.info(f"[EP] Dossier match: {slug}")
+            except Exception as e:
+                logger.warning(f"[EP] Dossier lookup failed: {e}")
 
         # Allow explicit force/update overrides
         request_upper = state.get("request", "").upper()
@@ -450,6 +485,14 @@ class Agent(BaseAgent):
                 )
 
             is_special_report = state.get("workflow") == "SPECIAL_REPORT"
+
+            if state.get("dossier_context") and agent_name in ("researcher", "writer"):
+                step_input += (
+                    "\n\nSTORY DOSSIER (accumulated context from our own prior coverage of this "
+                    "ongoing story — use it to understand what's already established and focus "
+                    "on what's new; it is not a substitute for live research on today's request):\n"
+                    f"{state['dossier_context']}"
+                )
 
             if output_dir and agent_name in ("writer", "fact_checker", "editor"):
                 step_input += f"\n\nSAVE_DIR: {output_dir}/articles"
@@ -838,6 +881,27 @@ class Agent(BaseAgent):
             except Exception as e:
                 logger.warning(f"[EP] Could not record to story_history: {e}")
 
+            # Append to the story dossier (tools/dossiers.py) — same success gate as
+            # story_history above. Skipped when there are no keywords to match/create by.
+            keywords = state.get("keywords", [])
+            if keywords:
+                try:
+                    from tools.dossiers import get_or_create_slug, append_entry as _dossier_append
+                    summary = _dossier_summary_snippet(
+                        outputs.get("editor") or outputs.get("writer") or ""
+                    )
+                    if summary:
+                        slug = get_or_create_slug(state.get("topic", ""), keywords)
+                        _dossier_append(
+                            slug=slug,
+                            topic=state.get("topic", ""),
+                            keywords=keywords,
+                            summary=summary,
+                            show_slug=state.get("show_slug", ""),
+                        )
+                except Exception as e:
+                    logger.warning(f"[EP] Could not append to dossier: {e}")
+
         return state
 
     # ------------------------------------------------------------------ #
@@ -877,6 +941,8 @@ class Agent(BaseAgent):
                 "dedup_suppressed": False,
                 "dedup_reason": "",
                 "prior_coverage": "",
+                "dossier_slug": "",
+                "dossier_context": "",
                 "current_step_index": 0,
                 "last_step_name": "",
                 "anchor_failed": False,
