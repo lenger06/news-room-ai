@@ -43,6 +43,42 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# ── Event feed background poller ─────────────────────────────────────────────
+async def _event_feed_loop():
+    """Poll free event feeds (USGS earthquakes, NWS weather alerts — see
+    tools/event_feeds.py) on an interval and evaluate any new candidate through
+    the same qualifying-criteria/dedup gates as /webhook/ingest. Only runs when
+    settings.EVENT_FEEDS_ENABLED is true."""
+    from tools.event_feeds import fetch_all
+    from agents.registry import agent_registry
+
+    while True:
+        try:
+            await asyncio.sleep(settings.EVENT_FEED_POLL_SECONDS)
+            candidates = await asyncio.to_thread(fetch_all)
+            if not candidates:
+                continue
+            checker = await agent_registry.get_agent("breaking_news_checker")
+            if not checker:
+                logger.warning("[event_feeds] Breaking News Checker not available — skipping candidates")
+                continue
+            for c in candidates:
+                logger.info(f"[event_feeds] Evaluating candidate: {c['headline']}")
+                try:
+                    result = await checker.process_webhook_event(
+                        source=c["source"], headline=c["headline"],
+                        detail=c.get("detail", ""), url=c.get("url", ""),
+                        keywords=c.get("keywords"),
+                    )
+                    logger.info(f"[event_feeds] Result: {result.get('response', '')[:200]}")
+                except Exception as e:
+                    logger.error(f"[event_feeds] Candidate evaluation failed: {e}", exc_info=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"[event_feeds] Poll loop error: {e}", exc_info=True)
+
+
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -58,8 +94,17 @@ async def lifespan(app: FastAPI):
     for d in [settings.ARTICLES_DIR, settings.SCRIPTS_DIR, settings.MEDIA_DIR, settings.LOGS_DIR]:
         Path(d).mkdir(parents=True, exist_ok=True)
 
+    event_feed_task = None
+    if settings.EVENT_FEEDS_ENABLED:
+        logger.info(f"=== Event feeds ENABLED — polling every {settings.EVENT_FEED_POLL_SECONDS}s ===")
+        event_feed_task = asyncio.create_task(_event_feed_loop())
+    else:
+        logger.info("=== Event feeds disabled (set EVENT_FEEDS_ENABLED=true in .env to enable) ===")
+
     logger.info("=== Newsroom AI ready ===")
     yield
+    if event_feed_task:
+        event_feed_task.cancel()
     logger.info("=== Newsroom AI shutting down ===")
 
 

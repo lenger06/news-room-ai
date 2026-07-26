@@ -148,20 +148,36 @@ keyword-set overlap — fine for dedup, not a knowledge store.
 
 ---
 
-## Phase 5 — Event-driven triggers
+## Phase 5 — Event-driven triggers — receiver + free adapters DONE (2026-07-26)
 
-This is the one item that may not belong in *this* repo. Scheduling and the
-breaking-news poll cadence currently live entirely in the external Jarvis
-caller — `news-room-ai` has no trigger loop of its own, just HTTP endpoints
-Jarvis calls.
+**Decision made:** built inside `news-room-ai` itself, not `jarvis-assistant-ai`.
+The receiving endpoint already lived here (`/webhook/ingest`); rather than
+duplicate a second external scheduler in Jarvis, the poller is a plain
+`asyncio` background task started in `main.py`'s own lifespan
+(`_event_feed_loop`), calling `breaking_news_checker.process_webhook_event()`
+directly in-process — no self-HTTP round-trip, no new scheduler to
+coordinate. This also sidesteps Jarvis's own scheduler having a live,
+unresolved bug (its 30-min breaking-news task has been stuck in a permanent
+`FAILED` state since 2026-07-18 because nothing resets its error counter).
 
-**Decision needed:** should anomaly/event detection be built into
-`jarvis-assistant-ai` (which already owns scheduling) or into a new
-lightweight monitor inside `news-room-ai`? Leaning toward Jarvis, since
-duplicating a scheduler here would fight the existing division of
-responsibility.
+`tools/event_feeds.py` implements the two free, no-API-key sources: the USGS
+significant-earthquakes GeoJSON feed and active NWS/weather.gov CAP alerts.
+A seen-event cache (`./output/event_feed_seen.json`, 72h TTL) prevents
+re-submitting the same still-active earthquake/alert every poll. **Disabled
+by default** (`EVENT_FEEDS_ENABLED=false`) — this is a genuinely new
+autonomous trigger path (a qualifying event can fire a real, credit-spending,
+publish-to-YouTube production with no human involved) and defaulting it on
+silently felt like the wrong call; the user enables it deliberately in `.env`.
+Covered by `tests/test_event_feeds.py` and `tests/test_event_feed_loop.py`.
 
-Regardless of where it lives:
+Not built: market-data websocket streams, an RSS-to-webhook bridge, and the
+X/Twitter filtered stream — all three need a paid/authenticated source that
+isn't configured in this project. They'd plug into the same
+`/webhook/ingest` → `process_webhook_event()` path either way; only the
+adapter (normalize the source's payload into the shared candidate shape)
+would need building.
+
+Still true regardless of source:
 - Upgrade `breaking_news_checker`'s static qualifying-criteria rubric
   (`prompts.py`) toward a rolling-baseline comparison (e.g. story volume/
   velocity on a topic vs. a trailing average) rather than a fixed keyword/
@@ -171,51 +187,44 @@ Regardless of where it lives:
   a bigger lift requiring paid data access — treat as a stretch goal, not a
   near-term milestone.
 
-**Concrete near-term build — `/webhook/ingest` endpoint.** Separate the two
-concerns: *receiving* a push (belongs in `news-room-ai`, since `main.py`
-already has the public HTTP surface and `breaking_news_checker` already has
-the exact "fire a new production" pattern to reuse — see
-`agent.py:247-260`) vs. *deciding* whether it's newsworthy (can stay
-Jarvis-side or be delegated back to `breaking_news_checker`'s LLM classifier).
+---
 
-Add one shared `POST /webhook/ingest` route in `main.py` that accepts a
-normalized `{source, headline, detail, url, keywords}` payload from any
-upstream feed and routes it through the same qualifying-criteria /
-dedup/cooldown gates `breaking_news_checker` already runs, then fires
-`/produce/async` on a pass. Cheap/free sources worth wiring first, roughly in
-order of setup effort:
-1. **USGS earthquake GeoJSON feed** — polled every 1–2 min (no native
-   webhook, but free, fast-changing, and simple to normalize).
-2. **NWS/weather.gov CAP alerts** — similar polling model, free.
-3. **Market-data websocket streams** (Polygon.io / Finnhub free tiers) for
-   stock-spike-driven stories.
-4. **RSS-via-WebSub or a no-code bridge** (Zapier/IFTTT/n8n watching RSS →
-   POST to `/webhook/ingest`) for outlets that don't offer a real API —
-   gets push-like behavior without building a poller per source.
-5. **X/Twitter API v2 filtered stream** for keyword-matched social signals,
-   if API access is available.
+## Phase 6 — Polish — DONE (2026-07-26)
 
-Each source gets a small adapter (normalize its payload shape → the shared
-schema above); the ingest endpoint and downstream gating logic stay common.
+- ~~Render lower-third/chyron graphics automatically~~ Done:
+  `tools/video_tools.py:render_graphic_overlays` burns each `[GRAPHIC: ...]`
+  cue into the video as a Pillow-rendered lower-third (dark bar + accent
+  stripe + bold text), composited with FFmpeg's `overlay` filter rather than
+  `drawtext` (avoids depending on FFmpeg being built with freetype support).
+  Timing is a proportional-position approximation, not real speech alignment
+  — documented clearly in the code and README since HeyGen doesn't return
+  word-level caption data to sync against. Verified against the real bundled
+  FFmpeg binary with a synthetic test clip (not just mocked control flow) in
+  `tests/test_video_editor_graphics_smoke.py`, including a visual check of
+  a rendered frame before trusting it in the live pipeline.
+- ~~Add real unit tests around the EP's LangGraph routing logic~~ Done as
+  part of Phase 1/2/3/4/5's own work — see `tests/`.
 
 ---
 
-## Phase 6 — Polish
+## Status
 
-- Render lower-third/chyron graphics automatically (FFmpeg `drawtext`/overlay)
-  instead of just extracting cues (`video_editor/prompts.py` already flags
-  this as a known future enhancement).
-- Add real unit tests around the EP's LangGraph routing logic. `test_tools.py`
-  today is a manual, live-API smoke test with no coverage of orchestration
-  decisions — once Phase 1 adds branching/retry logic, that logic needs
-  tests that don't require live API calls to catch regressions.
+All phases (0–6) are implemented, tested, and merged as of 2026-07-26. What's
+deliberately still open, not because it was missed but because it needs
+something this repo alone can't provide:
 
----
+- **Event feeds are disabled by default** (`EVENT_FEEDS_ENABLED=false`) —
+  enable deliberately in `.env` when ready to let earthquakes/weather alerts
+  autonomously trigger productions.
+- **Paid/authenticated event sources** (market data, RSS bridge, X filtered
+  stream) — adapters aren't built; would need an account/API key first.
+- **Graphic overlay timing is an approximation**, not real speech alignment
+  — revisit only if it visibly looks wrong in practice; a real fix would
+  need caption/forced-alignment data this pipeline doesn't currently have.
+- **Second search provider for fact-checking** — not added; only worth it if
+  single-provider (Tavily) corroboration proves insufficient in practice.
+- **Embeddings/vector DB for memory** — not added; dossiers (Phase 4) were
+  the cheaper option tried first, per the original plan.
 
-## Suggested sequencing
-
-Phase 0 → Phase 1 → Phase 2, in that order, since they're low-risk, build on
-existing infrastructure, and directly deliver "self-correcting." Phases 3–6
-can be reordered based on which failure mode actually bites first in
-practice (bad corroboration vs. missing continuity vs. missing graphics vs.
-scheduling).
+If new gaps surface through actual use, add them here rather than
+re-deriving this whole document from scratch.

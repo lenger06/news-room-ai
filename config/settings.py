@@ -57,6 +57,20 @@ class Settings:
     MEDIA_DIR: str = os.getenv("MEDIA_DIR", "./output/media")
     LOGS_DIR: str = os.getenv("LOGS_DIR", "./output/production_logs")
 
+    # Event feeds (USGS earthquake / NWS weather alerts) — see tools/event_feeds.py.
+    # Disabled by default: this is a genuinely new autonomous trigger path (a qualifying
+    # earthquake or severe weather alert can fire a real, credit-spending, publish-to-YouTube
+    # production with no human in the loop) — opt in deliberately.
+    EVENT_FEEDS_ENABLED: bool = os.getenv("EVENT_FEEDS_ENABLED", "False").lower() == "true"
+    EVENT_FEED_POLL_SECONDS: int = int(os.getenv("EVENT_FEED_POLL_SECONDS", "300"))
+    EVENT_FEED_MIN_MAGNITUDE: float = float(os.getenv("EVENT_FEED_MIN_MAGNITUDE", "6.0"))
+    EVENT_FEED_NWS_SEVERITIES: str = os.getenv("EVENT_FEED_NWS_SEVERITIES", "Extreme,Severe")
+    # NWS/weather.gov requires a descriptive User-Agent identifying the app + contact info —
+    # personalize this in .env before enabling event feeds.
+    EVENT_FEED_USER_AGENT: str = os.getenv(
+        "EVENT_FEED_USER_AGENT", "news-room-ai (set EVENT_FEED_USER_AGENT in .env with contact info)"
+    )
+
     # B-roll PiP compositing
     # Path to a still frame (JPEG/PNG) of the studio background used as the
     # composite base when showing b-roll in the upper-left corner.

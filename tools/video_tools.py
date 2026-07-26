@@ -113,6 +113,151 @@ def assemble_final_video(broadcast_path: Path) -> Path | None:
 prepend_promo = assemble_final_video
 
 
+def _get_video_duration_seconds(path: Path) -> float | None:
+    """Read the container duration via ffmpeg's stderr banner (imageio-ffmpeg bundles
+    ffmpeg but not ffprobe, so this avoids depending on a separate ffprobe binary)."""
+    ffmpeg = _get_ffmpeg()
+    if not ffmpeg:
+        return None
+    try:
+        result = subprocess.run([ffmpeg, "-i", str(path)], capture_output=True, timeout=30)
+        stderr = result.stderr.decode(errors="replace")
+        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", stderr)
+        if not m:
+            return None
+        h, mn, s = m.groups()
+        return int(h) * 3600 + int(mn) * 60 + float(s)
+    except Exception as e:
+        logger.warning(f"[video_editor] Could not read video duration: {e}")
+        return None
+
+
+_LOWER_THIRD_FONT_CANDIDATES = [
+    "C:/Windows/Fonts/arialbd.ttf",
+    "C:/Windows/Fonts/segoeuib.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+]
+
+
+def _load_lower_third_font(size: int):
+    from PIL import ImageFont
+    for path in _LOWER_THIRD_FONT_CANDIDATES:
+        if Path(path).exists():
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                continue
+    return ImageFont.load_default()
+
+
+def _render_lower_third_png(text: str, width: int = _OUT_W, height: int = _OUT_H) -> Path:
+    """Render a single lower-third graphic (dark bar + accent stripe + white text) as a
+    transparent PNG the same size as the broadcast frame, for FFmpeg to overlay in place."""
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    bar_height = int(height * 0.14)
+    bar_bottom_margin = int(height * 0.08)
+    bar_top = height - bar_height - bar_bottom_margin
+    draw.rectangle([0, bar_top, width, bar_top + bar_height], fill=(12, 12, 14, 210))
+    draw.rectangle([0, bar_top, 8, bar_top + bar_height], fill=(198, 30, 30, 255))
+
+    font = _load_lower_third_font(size=int(bar_height * 0.42))
+    draw.text((28, bar_top + bar_height // 2), text, font=font, fill=(255, 255, 255, 255), anchor="lm")
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+    img.save(tmp.name)
+    tmp.close()
+    return Path(tmp.name)
+
+
+_GRAPHIC_DISPLAY_SECONDS = 4.5
+
+
+def render_graphic_overlays(video_path: Path, cues: list[tuple[str, float]]) -> Path | None:
+    """
+    Burn [GRAPHIC: ...] cues into the video as lower-third overlays. `cues` is a list of
+    (text, fractional_position) tuples from extract_graphic_cues_with_position — timing is
+    a deliberate approximation (see that function's docstring), not exact speech alignment.
+    Returns the output path, or None if there's nothing to render or FFmpeg is unavailable.
+    """
+    if not cues:
+        return None
+
+    ffmpeg = _get_ffmpeg()
+    if not ffmpeg:
+        logger.warning("[video_editor] FFmpeg not found — skipping graphic overlays")
+        return None
+
+    duration = _get_video_duration_seconds(video_path)
+    if not duration:
+        logger.warning("[video_editor] Could not determine video duration — skipping graphic overlays")
+        return None
+
+    png_paths: list[Path] = []
+    timings: list[tuple[float, float]] = []
+    for text, frac in cues:
+        start = max(0.0, min(frac, 1.0)) * duration
+        end = min(start + _GRAPHIC_DISPLAY_SECONDS, duration)
+        if end - start < 0.5:
+            continue
+        try:
+            png_paths.append(_render_lower_third_png(text))
+            timings.append((start, end))
+        except Exception as e:
+            logger.warning(f"[video_editor] Could not render graphic '{text[:40]}': {e}")
+
+    if not png_paths:
+        return None
+
+    out_path = video_path.parent / f"gfx_{video_path.stem}.mp4"
+    cmd = [ffmpeg, "-y", "-i", str(video_path)]
+    for p in png_paths:
+        cmd += ["-i", str(p)]
+
+    filter_parts = []
+    prev = "0:v"
+    for i, (start, end) in enumerate(timings, 1):
+        label = f"g{i}"
+        filter_parts.append(f"[{prev}][{i}:v]overlay=0:0:enable='between(t,{start:.2f},{end:.2f})'[{label}]")
+        prev = label
+
+    cmd += [
+        "-filter_complex", ";".join(filter_parts),
+        "-map", f"[{prev}]",
+        "-map", "0:a",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        str(out_path),
+    ]
+
+    logger.info(f"[video_editor] Rendering {len(png_paths)} graphic overlay(s)")
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=600)
+        if result.returncode != 0:
+            logger.warning(
+                f"[video_editor] Graphic overlay FFmpeg failed (rc={result.returncode}): "
+                f"{result.stderr.decode(errors='replace')[-800:]}"
+            )
+            return None
+        size = out_path.stat().st_size
+        logger.info(f"[video_editor] Graphic overlays rendered ({size:,} bytes): {out_path.name}")
+        return out_path
+    except Exception as e:
+        logger.warning(f"[video_editor] render_graphic_overlays error: {e}")
+        return None
+    finally:
+        for p in png_paths:
+            try:
+                p.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 def compose_foreground_layers(video_path: Path, layers: list) -> Path | None:
     """
     FFmpeg: composite n foreground overlay images/videos on top of the broadcast video.
@@ -256,6 +401,22 @@ def extract_graphic_cues(script: str) -> str:
     cues = re.findall(r'\[GRAPHIC:\s*([^\]]+)\]', script, re.IGNORECASE)
     logger.info(f"[extract_graphic_cues] Found {len(cues)} graphic cues")
     return json.dumps({"graphic_cues": cues, "count": len(cues)})
+
+
+def extract_graphic_cues_with_position(script: str) -> list[tuple[str, float]]:
+    """
+    Plain-Python variant of extract_graphic_cues (not an LLM tool) that also returns
+    each cue's fractional position (0.0-1.0) in the script text — used to approximate
+    when the cue should appear on screen once the video is rendered. HeyGen does not
+    return word-level caption timing, so exact speech alignment isn't available; this
+    proportional estimate (cue's character offset / total script length, mapped onto
+    the video's actual duration) is a deliberate approximation, not a precise sync.
+    """
+    script_len = len(script) or 1
+    return [
+        (m.group(1).strip(), m.start() / script_len)
+        for m in re.finditer(r'\[GRAPHIC:\s*([^\]]+)\]', script, re.IGNORECASE)
+    ]
 
 
 @tool

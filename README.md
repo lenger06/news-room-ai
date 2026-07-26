@@ -199,7 +199,19 @@ Criteria are defined in `agents/breaking_news_checker/prompts.py`. The coverage 
 }
 ```
 
-It's evaluated by the same LLM qualifying-criteria judgment and same-story dedup/cooldown gates as the headline-scan path (`breaking_news_checker.process_webhook_event()`), then fires a production the same way if it clears the bar. The endpoint and gating logic are live; the actual feed adapters/pollers (USGS earthquake, NWS weather alerts, market-data streams, an RSS-to-webhook bridge) are not — see `SELF_IMPROVEMENT_ROADMAP.md` Phase 5.
+It's evaluated by the same LLM qualifying-criteria judgment and same-story dedup/cooldown gates as the headline-scan path (`breaking_news_checker.process_webhook_event()`), then fires a production the same way if it clears the bar.
+
+**Built-in event feed pollers** (`tools/event_feeds.py`) cover the two sources that need no API key or external account: the USGS significant-earthquakes feed and active NWS/weather.gov CAP alerts. Each candidate is deduplicated against a seen-event cache (`./output/event_feed_seen.json`, 72-hour TTL) so a still-active earthquake or alert isn't re-submitted every poll. **Disabled by default** — a qualifying earthquake or severe-weather alert firing a real, credit-spending, publish-to-YouTube production with no human in the loop is a genuinely new capability, not something to turn on silently. Enable it in `.env`:
+
+```env
+EVENT_FEEDS_ENABLED=true
+EVENT_FEED_POLL_SECONDS=300
+EVENT_FEED_MIN_MAGNITUDE=6.0
+EVENT_FEED_NWS_SEVERITIES=Extreme,Severe
+EVENT_FEED_USER_AGENT="news-room-ai (contact: you@example.com)"   # required by weather.gov's usage policy
+```
+
+When enabled, a background `asyncio` task inside this process (started in `main.py`'s lifespan, not a separate scheduler) polls both feeds and calls `process_webhook_event()` directly in-process for each new candidate. Market-data streams, an RSS-to-webhook bridge, and X/Twitter's filtered stream all need a paid/authenticated source that isn't configured here — see `SELF_IMPROVEMENT_ROADMAP.md` Phase 5 if you want to add one; they'd plug into the same `/webhook/ingest` gating either way.
 
 ### Story Deduplication (EP Dedup Gate)
 
@@ -289,7 +301,9 @@ Converts the editor-reviewed article into a spoken broadcast anchor script. Form
 Takes the broadcast script, applies TTS text normalisation (see below), strips formatting markers with a pure-regex cleaner (no LLM pass — prevents refusal text from being read aloud), and submits it to HeyGen using the selected anchor's avatar and voice IDs. For scenes with `[BROLL:]` markers, b-roll media (still images **or** video clips) is composited as a Picture-in-Picture in the upper-left corner of the studio background video using FFmpeg, uploaded as a new HeyGen video asset, and used as the scene background. The PIP preserves the original aspect ratio of the source media. Video clip b-roll loops seamlessly for the duration of the scene. Falls back to a Pillow static image composite if FFmpeg is unavailable (images only). Polls for completion natively in Python (every 30 seconds, up to 10 minutes) — does not rely on the LLM to manage polling. Returns the video URL and thumbnail URL when complete.
 
 ### Video Editor
-Downloads the completed anchor video from HeyGen, extracts all `[GRAPHIC: ...]` cues from the script, and assembles a `video_package.json` in `./output/{show_slug}/{run_id}/media/` containing the video file path, thumbnail URL, graphic cues, and suggested YouTube metadata.
+Downloads the completed anchor video from HeyGen, burns every `[GRAPHIC: ...]` cue into the video as an on-screen lower-third (dark bar + accent stripe + bold white text, rendered with Pillow and composited with FFmpeg's `overlay` filter — `tools/video_tools.py:render_graphic_overlays`), then assembles a `video_package.json` in `./output/{show_slug}/{run_id}/media/` containing the video file path, thumbnail URL, graphic cues, and suggested YouTube metadata.
+
+Timing is a deliberate approximation, not exact speech alignment: each cue's on-screen moment is estimated from its proportional position in the script text (character offset ÷ script length), mapped onto the rendered video's actual duration, and shown for ~4.5 seconds. HeyGen doesn't return word-level caption timing, so this is the practical alternative to a real forced-alignment pass. If FFmpeg can't determine the video's duration or isn't available, graphic rendering is skipped (not a hard failure) and the rest of the pipeline continues.
 
 ### Compliance Checker
 The last gate before publish, for `BROADCAST_VIDEO`, `VIDEO_FROM_SCRIPT`, and `SPECIAL_REPORT` workflows only. Screens the final broadcast script for content that could violate YouTube's Community Guidelines — graphic violence, hate speech, harassment of private individuals, promotion of dangerous acts, sexual content, and policy-sensitive misinformation (elections, medical claims) — without re-litigating factual accuracy, which is the Fact Checker's job. Issues one of two verdicts: `CLEAR TO PUBLISH` or `HOLD FOR REVIEW`. Unlike the fact-check loop, there's **no retry** here — a policy concern usually isn't something an automated rewrite can reliably fix, so a `HOLD` halts the pipeline immediately and logs to the human review queue.
@@ -508,6 +522,13 @@ MEDIA_DIR=./output/media
 LOGS_DIR=./output/production_logs
 
 YOUTUBE_CLIENT_SECRETS_PATH=credentials/youtube_client_secrets.json
+
+# Event feeds — disabled by default, see "Event webhooks" above before enabling
+EVENT_FEEDS_ENABLED=False
+EVENT_FEED_POLL_SECONDS=300
+EVENT_FEED_MIN_MAGNITUDE=6.0
+EVENT_FEED_NWS_SEVERITIES=Extreme,Severe
+EVENT_FEED_USER_AGENT="news-room-ai (contact: you@example.com)"
 ```
 
 ### Per-Agent Model Configuration
@@ -613,11 +634,13 @@ curl -X POST http://localhost:8091/produce/async \
 
 ## Testing
 
-`tests/` is a `pytest` suite covering the Executive Producer's orchestration logic — self-correction routing/retries, the compliance gate, the human review queue, the webhook endpoint, and the success/error status surfaced to callers. Everything in it is mocked (no live LLM/API calls, no cost, safe to run anytime):
+`tests/` is a `pytest` suite covering the Executive Producer's orchestration logic — self-correction routing/retries, the compliance gate, the human review queue, the webhook endpoint and event feed adapters, story dossiers, and the success/error status surfaced to callers. Everything in it is mocked (no live LLM/API calls, no external network access, no cost):
 
 ```bash
 pip install pytest pytest-asyncio
 pytest
 ```
+
+One exception: `tests/test_video_editor_graphics_smoke.py` runs the real bundled FFmpeg binary against a synthetic in-memory test clip (generated via FFmpeg's own `lavfi` source, no external assets) to actually prove the graphic-overlay filter chain and duration parsing work on this system — a few real (but fast, seconds-long) encodes, still no network calls or cost, still safe to run as part of the normal suite.
 
 `test_tools.py` is separate and different in kind — a manual smoke test (`python test_tools.py`) that makes real calls against every configured API (OpenAI, Tavily, Pixabay, HeyGen, YouTube) to confirm credentials and connectivity. Run it deliberately, not as part of routine iteration.

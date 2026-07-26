@@ -13,7 +13,10 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_openai import ChatOpenAI
 from agents.registry import BaseAgent, AgentInfo
 from agents.video_editor.prompts import VIDEO_EDITOR_PROMPT
-from tools.video_tools import download_video, extract_graphic_cues, save_video_package, assemble_final_video, compose_foreground_layers
+from tools.video_tools import (
+    download_video, extract_graphic_cues, save_video_package, assemble_final_video,
+    compose_foreground_layers, extract_graphic_cues_with_position, render_graphic_overlays,
+)
 from tools.file_operations_tool import file_operations_tool
 from config.settings import settings
 from config.overlays import get_foreground_layers
@@ -59,6 +62,25 @@ class Agent(BaseAgent):
                     broadcast_path = Path(pkg.get("video_file", ""))
 
                     if broadcast_path.exists():
+                        # Step 0: Burn [GRAPHIC:] cues into the video as lower-third overlays.
+                        # Extracted directly from the script text in this message (not from the
+                        # LLM's own tool call above) so rendering doesn't depend on the LLM
+                        # having faithfully preserved cue text/order when building the package.
+                        script_match = re.search(
+                            r'=== SCRIPT ===\s*(.*?)(?=\n\nDESK_SLUG:|\n\nMEDIA_DIR:|===|\Z)',
+                            message, re.DOTALL | re.IGNORECASE,
+                        )
+                        if script_match:
+                            cues = extract_graphic_cues_with_position(script_match.group(1))
+                            if cues:
+                                gfx_path = render_graphic_overlays(broadcast_path, cues)
+                                if gfx_path:
+                                    broadcast_path = gfx_path
+                                    pkg["video_file"] = str(gfx_path)
+                                    pkg["graphic_overlays_applied"] = len(cues)
+                                    logger.info(f"[video_editor] Graphic overlays applied → {gfx_path.name}")
+                                    response_text += f"\nGraphic overlays applied ({len(cues)}) → {gfx_path.name}"
+
                         # Step 1: Apply foreground layers (in front of avatar) if any
                         desk_slug = ""
                         m = re.search(r'DESK_SLUG[:\s]+([^\n]+)', message, re.IGNORECASE)
