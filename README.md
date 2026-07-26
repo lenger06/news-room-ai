@@ -565,6 +565,10 @@ python main.py
 
 Server starts at `http://0.0.0.0:8091`.
 
+### Logging
+
+`main.py` writes to `logs/newsroom_YYYY-MM-DD.log` — a fresh dated file each day (or on any restart that crosses into a new day), size-capped within that day via `concurrent_log_handler.ConcurrentRotatingFileHandler` (`LOG_MAX_BYTES`, default 25MB), with gzip'd numbered backups (`LOG_BACKUP_COUNT`, default 10) and old dated files pruned after `LOG_RETENTION_DAYS` (default 30) — a log4j-style combined size+time rolling policy. `ConcurrentRotatingFileHandler` specifically (not stdlib's `RotatingFileHandler`) because uvicorn's `--reload` briefly runs two processes across a restart, and plain rotating handlers aren't safe when more than one process can write/rotate the same file concurrently.
+
 ---
 
 ## API Endpoints

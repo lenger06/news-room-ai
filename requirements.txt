@@ -22,3 +22,6 @@ google-auth-oauthlib>=1.1.0
 
 # RSS/Atom event feed adapter
 feedparser>=6.0.0
+
+# Process-safe rotating file logging (safe across uvicorn --reload's brief multi-process overlap)
+concurrent-log-handler>=0.9.25

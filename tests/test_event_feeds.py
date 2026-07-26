@@ -133,6 +133,10 @@ def test_nws_sends_required_user_agent_header(tmp_path, monkeypatch):
 
 def test_fetch_all_merges_both_sources(tmp_path, monkeypatch):
     _patch_seen(tmp_path, monkeypatch)
+    # fetch_all() also calls fetch_rss_feeds() with no explicit urls, which falls back to
+    # settings.EVENT_FEED_RSS_URLS — force it empty so this test can't make real network
+    # calls to whatever feeds happen to be configured in the real .env.
+    monkeypatch.setattr(event_feeds.settings, "EVENT_FEED_RSS_URLS", "")
 
     def fake_get(url, headers=None, timeout=None):
         if "earthquake" in url:

@@ -51,6 +51,13 @@ class Settings:
     DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
+    # Logging rotation (see main.py) — one dated file per day, size-capped within
+    # that day via a process-safe rotating handler, with old dated files pruned after
+    # LOG_RETENTION_DAYS. Mirrors a log4j-style size+time rolling policy.
+    LOG_MAX_BYTES: int = int(os.getenv("LOG_MAX_BYTES", str(25 * 1024 * 1024)))  # 25MB
+    LOG_BACKUP_COUNT: int = int(os.getenv("LOG_BACKUP_COUNT", "10"))
+    LOG_RETENTION_DAYS: int = int(os.getenv("LOG_RETENTION_DAYS", "30"))
+
     # Output directories
     ARTICLES_DIR: str = os.getenv("ARTICLES_DIR", "./output/articles")
     SCRIPTS_DIR: str = os.getenv("SCRIPTS_DIR", "./output/scripts")

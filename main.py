@@ -29,12 +29,47 @@ if str(project_root) not in sys.path:
 from config.settings import settings
 
 # ── Logging ───────────────────────────────────────────────────────────────────
+# One dated file per day (logs/newsroom_YYYY-MM-DD.log), size-capped within that day
+# via a process-safe rotating handler (ConcurrentRotatingFileHandler — plain
+# logging.FileHandler/RotatingFileHandler aren't safe when multiple OS processes write
+# the same file, which uvicorn's --reload briefly does across a restart), with gzip'd
+# backups and old dated files pruned after LOG_RETENTION_DAYS. Mirrors a log4j-style
+# combined size+time rolling policy.
+import time as _time
+from datetime import date as _date
+from concurrent_log_handler import ConcurrentRotatingFileHandler
+
 Path("logs").mkdir(exist_ok=True)
+
+
+def _cleanup_old_logs(directory: str, pattern: str, retention_days: int) -> None:
+    """Delete dated log files older than retention_days — the retention half of the
+    rolling policy; rotation within a single day is handled separately by maxBytes."""
+    cutoff = _time.time() - retention_days * 86400
+    for p in Path(directory).glob(pattern):
+        try:
+            if p.stat().st_mtime < cutoff:
+                p.unlink()
+        except OSError:
+            pass
+
+
+_cleanup_old_logs("logs", "newsroom_*.log*", settings.LOG_RETENTION_DAYS)
+
+_log_filename = f"logs/newsroom_{_date.today().isoformat()}.log"
+_file_handler = ConcurrentRotatingFileHandler(
+    _log_filename,
+    maxBytes=settings.LOG_MAX_BYTES,
+    backupCount=settings.LOG_BACKUP_COUNT,
+    encoding="utf-8",
+    use_gzip=True,
+)
+
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL, logging.INFO),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("logs/newsroom.log", encoding="utf-8"),
+        _file_handler,
         logging.StreamHandler(
             stream=open(sys.stdout.fileno(), mode="w", encoding="utf-8", closefd=False)
         ),
@@ -391,6 +426,9 @@ if __name__ == "__main__":
         host=settings.HOST,
         port=settings.PORT,
         reload=settings.DEBUG,
-        reload_excludes=["cache/*", "output/*", "logs/*", "assets/*", "credentials/*"],
+        reload_excludes=[
+            "cache/*", "output/*", "logs/*", "assets/*", "credentials/*",
+            "**/__pycache__/*", ".pytest_cache/*", "tests/*",
+        ],
         log_level=settings.LOG_LEVEL.lower(),
     )
