@@ -65,6 +65,12 @@ class Settings:
     EVENT_FEED_POLL_SECONDS: int = int(os.getenv("EVENT_FEED_POLL_SECONDS", "300"))
     EVENT_FEED_MIN_MAGNITUDE: float = float(os.getenv("EVENT_FEED_MIN_MAGNITUDE", "6.0"))
     EVENT_FEED_NWS_SEVERITIES: str = os.getenv("EVENT_FEED_NWS_SEVERITIES", "Extreme,Severe")
+    # Comma-separated RSS/Atom feed URLs to poll (empty = disabled even if EVENT_FEEDS_ENABLED
+    # is true). Point this at low-volume "breaking news"/"top stories" category feeds, not a
+    # full firehose — every new item still goes through the same strict qualifying-criteria
+    # LLM gate as the other feeds, so a high-volume feed just means a lot of wasted evaluations.
+    EVENT_FEED_RSS_URLS: str = os.getenv("EVENT_FEED_RSS_URLS", "")
+    EVENT_FEED_RSS_MAX_ITEMS_PER_FEED: int = int(os.getenv("EVENT_FEED_RSS_MAX_ITEMS_PER_FEED", "10"))
     # NWS/weather.gov requires a descriptive User-Agent identifying the app + contact info —
     # personalize this in .env before enabling event feeds.
     EVENT_FEED_USER_AGENT: str = os.getenv(

@@ -160,22 +160,33 @@ coordinate. This also sidesteps Jarvis's own scheduler having a live,
 unresolved bug (its 30-min breaking-news task has been stuck in a permanent
 `FAILED` state since 2026-07-18 because nothing resets its error counter).
 
-`tools/event_feeds.py` implements the two free, no-API-key sources: the USGS
-significant-earthquakes GeoJSON feed and active NWS/weather.gov CAP alerts.
-A seen-event cache (`./output/event_feed_seen.json`, 72h TTL) prevents
-re-submitting the same still-active earthquake/alert every poll. **Disabled
-by default** (`EVENT_FEEDS_ENABLED=false`) — this is a genuinely new
-autonomous trigger path (a qualifying event can fire a real, credit-spending,
+`tools/event_feeds.py` implements three sources: the USGS
+significant-earthquakes GeoJSON feed, active NWS/weather.gov CAP alerts
+(neither needs an API key), and a configurable RSS/Atom poller
+(`fetch_rss_feeds`, added 2026-07-26 after checking what real wire-service
+webhooks actually cost — AP's Breaking News API is self-serve but pull-only;
+Reuters/Bloomberg/Dataminr are genuinely push-capable but enterprise-priced
+with no public signup, ballpark $10k+/month for Dataminr specifically). The
+RSS poller is the practical substitute: point `EVENT_FEED_RSS_URLS` at
+outlets' public "breaking news" category feeds (many syndicate AP content)
+rather than a general firehose, since every item still runs through the same
+strict LLM qualifying-criteria gate — a high-volume feed just means wasted
+evaluation calls, not more real breaking news. A seen-event cache
+(`./output/event_feed_seen.json`, 72h TTL) prevents re-submitting the same
+still-active earthquake/alert/RSS item every poll. **Disabled by default**
+(`EVENT_FEEDS_ENABLED=false`, and RSS additionally requires
+`EVENT_FEED_RSS_URLS` to be non-empty) — this is a genuinely new autonomous
+trigger path (a qualifying event can fire a real, credit-spending,
 publish-to-YouTube production with no human involved) and defaulting it on
 silently felt like the wrong call; the user enables it deliberately in `.env`.
-Covered by `tests/test_event_feeds.py` and `tests/test_event_feed_loop.py`.
+Covered by `tests/test_event_feeds.py`, `tests/test_event_feeds_rss.py`, and
+`tests/test_event_feed_loop.py`.
 
-Not built: market-data websocket streams, an RSS-to-webhook bridge, and the
-X/Twitter filtered stream — all three need a paid/authenticated source that
-isn't configured in this project. They'd plug into the same
-`/webhook/ingest` → `process_webhook_event()` path either way; only the
-adapter (normalize the source's payload into the shared candidate shape)
-would need building.
+Not built: market-data websocket streams and the X/Twitter filtered stream —
+both need a paid/authenticated source that isn't configured in this project.
+They'd plug into the same `/webhook/ingest` → `process_webhook_event()` path
+either way; only the adapter (normalize the source's payload into the shared
+candidate shape) would need building.
 
 Still true regardless of source:
 - Upgrade `breaking_news_checker`'s static qualifying-criteria rubric
@@ -214,10 +225,15 @@ deliberately still open, not because it was missed but because it needs
 something this repo alone can't provide:
 
 - **Event feeds are disabled by default** (`EVENT_FEEDS_ENABLED=false`) —
-  enable deliberately in `.env` when ready to let earthquakes/weather alerts
-  autonomously trigger productions.
-- **Paid/authenticated event sources** (market data, RSS bridge, X filtered
-  stream) — adapters aren't built; would need an account/API key first.
+  enable deliberately in `.env` when ready to let earthquakes/weather
+  alerts/RSS items autonomously trigger productions. RSS specifically also
+  needs `EVENT_FEED_RSS_URLS` populated — empty by default.
+- **Paid/authenticated event sources** (market data, X filtered stream) —
+  adapters aren't built; would need an account/API key first. The
+  wire-service webhook question (AP/Reuters/Dataminr) was investigated
+  2026-07-26 — all either pull-only or enterprise-priced with no self-serve
+  push access, which is why the RSS poller exists as the practical
+  alternative instead.
 - **Graphic overlay timing is an approximation**, not real speech alignment
   — revisit only if it visibly looks wrong in practice; a real fix would
   need caption/forced-alignment data this pipeline doesn't currently have.

@@ -138,6 +138,62 @@ def fetch_nws_alerts(severities: tuple | None = None) -> list[dict]:
     return _filter_unseen(candidates)
 
 
+def _rss_keywords(title: str) -> list[str]:
+    """Pull discriminating keywords out of a headline — prefers capitalized (likely
+    proper-noun) tokens, same convention used elsewhere; falls back to longer words
+    if the headline has no capitalized tokens at all."""
+    words = re.findall(r"[A-Za-z][A-Za-z'-]{2,}", title)
+    capitalized = [w.lower() for w in words if w[0].isupper()]
+    pool = capitalized if capitalized else [w.lower() for w in words if len(w) > 4]
+    return list(dict.fromkeys(pool))[:6]
+
+
+def fetch_rss_feeds(urls: list[str] | None = None, max_items_per_feed: int | None = None) -> list[dict]:
+    """
+    Poll a configurable list of RSS/Atom feeds (settings.EVENT_FEED_RSS_URLS) and return
+    unseen items as candidates. This is the practical alternative to a real wire-service
+    webhook (AP/Reuters/Dataminr are all enterprise-priced with no self-serve push access) —
+    point it at outlets' public "breaking news" or "top stories" category feeds, many of
+    which syndicate AP wire content, rather than a full general-news firehose.
+    """
+    urls = urls if urls is not None else [u.strip() for u in settings.EVENT_FEED_RSS_URLS.split(",") if u.strip()]
+    if not urls:
+        return []
+
+    max_items_per_feed = max_items_per_feed if max_items_per_feed is not None else settings.EVENT_FEED_RSS_MAX_ITEMS_PER_FEED
+
+    import feedparser
+
+    candidates = []
+    for url in urls:
+        try:
+            parsed = feedparser.parse(url)
+        except Exception as e:
+            logger.warning(f"[event_feeds] RSS fetch failed for {url}: {e}")
+            continue
+        if not parsed.entries:
+            if getattr(parsed, "bozo", False):
+                logger.warning(f"[event_feeds] RSS feed unparseable or empty: {url}")
+            continue
+
+        source_name = (parsed.feed.get("title") or url).strip()
+        for entry in parsed.entries[:max_items_per_feed]:
+            event_id = entry.get("id") or entry.get("link") or entry.get("title")
+            if not event_id:
+                continue
+            title = entry.get("title", "Untitled").strip()
+            summary = re.sub(r'<[^>]+>', '', entry.get("summary", ""))[:400].strip()
+            candidates.append({
+                "source": f"rss:{source_name}",
+                "headline": title,
+                "detail": summary,
+                "url": entry.get("link", ""),
+                "keywords": _rss_keywords(title),
+                "event_id": f"rss:{event_id}",
+            })
+    return _filter_unseen(candidates)
+
+
 def fetch_all() -> list[dict]:
     """Fetch and merge unseen candidates from every configured feed."""
-    return fetch_usgs_earthquakes() + fetch_nws_alerts()
+    return fetch_usgs_earthquakes() + fetch_nws_alerts() + fetch_rss_feeds()

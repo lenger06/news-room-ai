@@ -201,7 +201,7 @@ Criteria are defined in `agents/breaking_news_checker/prompts.py`. The coverage 
 
 It's evaluated by the same LLM qualifying-criteria judgment and same-story dedup/cooldown gates as the headline-scan path (`breaking_news_checker.process_webhook_event()`), then fires a production the same way if it clears the bar.
 
-**Built-in event feed pollers** (`tools/event_feeds.py`) cover the two sources that need no API key or external account: the USGS significant-earthquakes feed and active NWS/weather.gov CAP alerts. Each candidate is deduplicated against a seen-event cache (`./output/event_feed_seen.json`, 72-hour TTL) so a still-active earthquake or alert isn't re-submitted every poll. **Disabled by default** — a qualifying earthquake or severe-weather alert firing a real, credit-spending, publish-to-YouTube production with no human in the loop is a genuinely new capability, not something to turn on silently. Enable it in `.env`:
+**Built-in event feed pollers** (`tools/event_feeds.py`) cover three sources: the USGS significant-earthquakes feed and active NWS/weather.gov CAP alerts (both need no API key or account at all), plus a configurable RSS/Atom poller. The RSS poller exists because the real wire services (AP, Reuters, Bloomberg, Dataminr) are either pull-only or enterprise-priced with no self-serve push access — pointing this at outlets' public "breaking news" category feeds (many of which syndicate AP wire content) is the practical alternative. Each candidate, from any of the three sources, is deduplicated against a seen-event cache (`./output/event_feed_seen.json`, 72-hour TTL) so a still-active earthquake, alert, or RSS item isn't re-submitted every poll. **Disabled by default** — a qualifying event firing a real, credit-spending, publish-to-YouTube production with no human in the loop is a genuinely new capability, not something to turn on silently. Enable it in `.env`:
 
 ```env
 EVENT_FEEDS_ENABLED=true
@@ -209,9 +209,11 @@ EVENT_FEED_POLL_SECONDS=300
 EVENT_FEED_MIN_MAGNITUDE=6.0
 EVENT_FEED_NWS_SEVERITIES=Extreme,Severe
 EVENT_FEED_USER_AGENT="news-room-ai (contact: you@example.com)"   # required by weather.gov's usage policy
+EVENT_FEED_RSS_URLS=""    # comma-separated feed URLs — empty = RSS polling stays off even if enabled above
+EVENT_FEED_RSS_MAX_ITEMS_PER_FEED=10
 ```
 
-When enabled, a background `asyncio` task inside this process (started in `main.py`'s lifespan, not a separate scheduler) polls both feeds and calls `process_webhook_event()` directly in-process for each new candidate. Market-data streams, an RSS-to-webhook bridge, and X/Twitter's filtered stream all need a paid/authenticated source that isn't configured here — see `SELF_IMPROVEMENT_ROADMAP.md` Phase 5 if you want to add one; they'd plug into the same `/webhook/ingest` gating either way.
+When enabled, a background `asyncio` task inside this process (started in `main.py`'s lifespan, not a separate scheduler) polls every configured feed and calls `process_webhook_event()` directly in-process for each new candidate — every RSS item still has to clear the same strict qualifying-criteria LLM gate as an earthquake or weather alert, so pointing `EVENT_FEED_RSS_URLS` at a high-volume general-news feed just means a lot of wasted evaluation calls, not a lot of extra breaking news. Market-data streams and X/Twitter's filtered stream still need a paid/authenticated source that isn't configured here — see `SELF_IMPROVEMENT_ROADMAP.md` Phase 5 if you want to add one; they'd plug into the same gating either way.
 
 ### Story Deduplication (EP Dedup Gate)
 
