@@ -6,17 +6,22 @@ had background problems, and define a path off V1/V2 that never interrupts
 the currently-live `pip_v2` shows until a V3 replacement is proven equal or
 better.
 
-**Status (2026-07-27): Phase 1 implemented and live-validated end-to-end.**
-The `pip_v3_chromakey` video style exists, is fully tested (mocked + real
-FFmpeg smoke tests), and has now been run for real against 4 avatars via the
-actual production function (not hand-rolled payloads) — catching and fixing
-two real bugs in the process (see §10). It is not the default for any show —
-`pip_v2` is untouched. **One new, unresolved finding narrows the
-conclusion**: the `avatar_iii`/`studio_avatar` tier (a third of the roster)
-intermittently renders with a visible "Veo" watermark burned into the frame
-— confirmed live, not deterministic. The `avatar_iv`/`avatar_v` tier
-(most of the roster) is now genuinely confirmed clean. See §10 for the full
-writeup and §11 for the updated recommendation.
+**Status (2026-07-27): Phase 1 implemented, live-validated, and rolled out to
+every show.** The `pip_v3_chromakey` video style exists, is fully tested
+(mocked + real FFmpeg smoke tests), and was run for real against 4 avatars
+via the actual production function — catching and fixing two real bugs in
+the process (see §10). **One unresolved finding**: the `avatar_iii`/
+`studio_avatar` tier (a third of the roster) intermittently renders with a
+visible "Veo" watermark burned into the frame — confirmed live, not
+deterministic. The `avatar_iv`/`avatar_v` tier is confirmed clean. **Larry
+made an explicit, informed decision to flip every show to
+`pip_v3_chromakey` immediately (2026-07-27), accepting the avatar_iii
+watermark risk** rather than piloting gradually — see §12. A safety net was
+added so Daniel Mercer's stories (confirmed `v3_unsupported` — his renders
+never honor a background at all, a hard failure, not a quality risk like
+avatar_iii) automatically fall back to `pip_v2` per-render instead of
+failing outright. See §10 for the live-testing writeup, §11 for what the
+recommendation *was* before that decision, §12 for the actual rollout.
 
 **Bottom line up front:** the background problems weren't a bug in this
 codebase — they're a real, structural V3 platform limitation. No endpoint or
@@ -555,7 +560,7 @@ look, Darlene Smith), `v3_supports_remove_background=False` for every
 `avatar_iii`-only look, and inline notes on Shawn's and Brandon's specific
 looks recording the mixed clean/watermarked results.
 
-## 11. Updated recommendation
+## 11. Updated recommendation (superseded by §12 — kept for the record)
 
 **Pilot on the `avatar_iv`/`avatar_v` (full-access) tier only, for now.**
 Zayne Carter and Darlene Smith are genuinely confirmed clean across multiple
@@ -574,3 +579,56 @@ Blackwood/Dexter) on `pip_v3_chromakey` until one of:
 None of this changes §9's Phase 2 pilot recommendation for the full-access
 tier — Zayne Carter or Alexa Chen on `entertainment-weekly` remains a good
 first candidate.
+
+---
+
+## 12. Full rollout (2026-07-27) — every show, avatar_iii risk accepted
+
+After reviewing §10/§11, Larry made the call directly: skip the gradual
+single-show pilot and flip **every show** to `pip_v3_chromakey` immediately,
+explicitly accepting the avatar_iii watermark risk from §10 rather than
+waiting on (a)/(b)/(c) from §11.
+
+**What changed to make this safe to do in one step:**
+- `config/shows.py`: all 6 shows (`morning-report`, `evening-news`,
+  `weekend-roundup`, `entertainment-weekly`, `special-report`,
+  `breaking-news`) now explicitly set `video_style="pip_v3_chromakey"`.
+  `pip_v2`/`fullscreen_v3` remain fully intact in the code — reverting any
+  single show is a one-line change, not a rollback.
+- **New safety net in `agents/anchor/agent.py`**: before dispatching to
+  `generate_video_multiscene_v3_chromakey`, the resolved avatar is checked
+  against `get_look_by_avatar_id(...).v3_unsupported`. If flagged (currently
+  only Daniel Mercer), the render transparently falls back to
+  `generate_video_multiscene` (`pip_v2`) instead of calling the chromakey
+  path at all — so his stories keep working exactly as before rather than
+  erroring out on every render. This is different in kind from the
+  avatar_iii risk: Daniel Mercer fails *every time* (no background at all),
+  which is a correctness bug to guard against in code; avatar_iii fails
+  *intermittently* (a quality/branding risk Larry chose to accept knowingly,
+  not something code can reliably detect or route around yet).
+- Regression test added
+  (`test_anchor_agent_falls_back_to_pip_v2_for_v3_unsupported_avatar`)
+  confirming the chromakey generator is never even called for a
+  v3_unsupported avatar under this video_style.
+- Full suite: 132 passed.
+
+**What this means in practice, per anchor tier:**
+- **Zayne Carter, Darlene Smith, and the rest of the `avatar_iv`/`avatar_v`
+  roster** (Alexa Chen, Nicholas Stavros, Victor Marinos, Karoline Faye,
+  Dominic Fairchild): render via `pip_v3_chromakey`. Only Zayne and Darlene
+  have been visually reviewed end-to-end so far — the rest share the same
+  engine tier and the same code path, but watching the first few real
+  productions from each is still worth doing.
+- **Daniel Mercer**: automatically falls back to `pip_v2` per-render, no
+  action needed, no interruption.
+- **avatar_iii tier** (Shawn Green, Brandon Jones, Monica Hayes/Saskia,
+  Valerie Brooks/Candace, Alister Blackwood/Dexter): render via
+  `pip_v3_chromakey` with the accepted risk that some fraction of renders
+  will carry a visible "Veo" watermark. No automated detection exists yet
+  (§11c) — until it does, this means **someone needs to actually look at
+  each published video from this tier**, at least until real-world frequency
+  is better understood.
+
+This change takes effect the next time the live server (re)starts / picks up
+the config — Larry stopped the running server himself before this rollout
+per his own process.

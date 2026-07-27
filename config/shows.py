@@ -32,8 +32,10 @@ class Show:
     video_style: str = "pip_v2"                           # "pip_v2" = PiP overlay (v2 API) | "fullscreen_v3" = full-screen cuts (v3 API)
                                                             # | "pip_v3_chromakey" = v3 greenscreen avatar composited locally onto the
                                                             #   same studio background/PiP pipeline as pip_v2 (see HEYGEN_V3_MIGRATION_PLAN.md).
-                                                            #   Opt-in only — no show uses this yet; anchors flagged v3_unsupported in
-                                                            #   config/anchors.py (currently just Daniel Mercer) will fail if assigned this style.
+                                                            #   Every show below explicitly sets this as of 2026-07-27 (Larry's decision,
+                                                            #   accepting the known avatar_iii intermittent-watermark risk in sec 4a/10-11).
+                                                            #   anchors.get_look_by_avatar_id(...).v3_unsupported avatars (currently just
+                                                            #   Daniel Mercer) auto-fall-back to pip_v2 per-render — see agents/anchor/agent.py.
 
     def anchor_for_desk(self, desk_slug: str) -> Optional[DeskAssignment]:
         """Return the desk assignment, or None if the desk isn't listed for this show."""
@@ -66,6 +68,7 @@ SHOWS: dict[str, Show] = {
             "but keeps pacing brisk for the morning audience."
         ),
         tone="conversational and upbeat",
+        video_style="pip_v3_chromakey",
         desk_anchors={
             "national":       DeskAssignment("Daniel Mercer",    "casual", alt_anchor_name="Alexa Chen",    alt_every=3),
             "politics":       DeskAssignment("Daniel Mercer",    "casual", alt_anchor_name="Alexa Chen",    alt_every=3),
@@ -86,6 +89,7 @@ SHOWS: dict[str, Show] = {
             "Formal tone — anchors dressed for the main desk."
         ),
         tone="serious and authoritative",
+        video_style="pip_v3_chromakey",
         desk_anchors={
             "national":       DeskAssignment("Nicholas Stavros", "formal", alt_anchor_name="Daniel Mercer",  alt_every=3),
             "politics":       DeskAssignment("Shawn Green",      "formal", alt_anchor_name="Victor Marinos", alt_every=3),
@@ -106,6 +110,7 @@ SHOWS: dict[str, Show] = {
             "and previews the week ahead."
         ),
         tone="measured and reflective",
+        video_style="pip_v3_chromakey",
         desk_anchors={
             "national":       DeskAssignment("Alister Blackwood",""),
             "politics":       DeskAssignment("Alister Blackwood",""),
@@ -125,8 +130,9 @@ SHOWS: dict[str, Show] = {
             "Celebrity news, film, music, arts, and pop culture."
         ),
         tone="upbeat and conversational",
+        video_style="pip_v3_chromakey",
         desk_anchors={
-            "entertainment":  DeskAssignment("Alexa Chen",   ""),            
+            "entertainment":  DeskAssignment("Alexa Chen",   ""),
             "national":       DeskAssignment("Dominic Fairchild","casual"),
             "politics":       DeskAssignment("Dominic Fairchild","casual"),
             "business":       DeskAssignment("Brandon Jones",    ""),
@@ -144,6 +150,7 @@ SHOWS: dict[str, Show] = {
         ),
         tone="measured, thorough, and authoritative. Build the story methodically with full context and analysis.",
         background_asset_id="ac28ab03ec26464e8adc88458bdd2fec",   # foreign desk bg — replace when custom bg is ready
+        video_style="pip_v3_chromakey",
         desk_anchors={
             "national":       DeskAssignment("Shawn Green", ""),
             "politics":       DeskAssignment("Shawn Green", ""),
@@ -165,7 +172,8 @@ SHOWS: dict[str, Show] = {
         ),
         tone="urgent and direct. Lead immediately with the breaking development. No preamble.",
         background_asset_id="e81b39b787274f149b3f6aaf313e7050",   # foreign desk bg — replace when custom bg is ready
-         desk_anchors={
+        video_style="pip_v3_chromakey",
+        desk_anchors={
             "national":       DeskAssignment("Nicholas Stavros", "formal"),
             "politics":       DeskAssignment("Victor Marinos",   "formal"),
             "foreign":        DeskAssignment("Shawn Green",      "formal"),

@@ -15,6 +15,7 @@ from langchain_openai import ChatOpenAI
 from agents.registry import BaseAgent, AgentInfo
 from tools.heygen_tool import get_heygen_credits, generate_video_multiscene, generate_video_multiscene_v3, generate_video_multiscene_v3_chromakey, delete_heygen_asset, prepare_enhanced_background
 from config.overlays import get_background_layers
+from config.anchors import get_look_by_avatar_id
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -528,6 +529,17 @@ class Agent(BaseAgent):
                 _gen_fn = generate_video_multiscene_v3
             elif video_style == "pip_v3_chromakey":
                 _gen_fn = generate_video_multiscene_v3_chromakey
+                _look = get_look_by_avatar_id(avatar_id)
+                if _look and _look.v3_unsupported:
+                    # e.g. Daniel Mercer — his renders don't honor a background at all
+                    # under v3 (see HEYGEN_V3_MIGRATION_PLAN.md sec 4a), so pip_v3_chromakey
+                    # would fail every time. Fall back to pip_v2 instead of erroring out —
+                    # this migration's whole premise is not interrupting existing capability.
+                    logger.warning(
+                        f"[anchor] avatar_id={avatar_id!r} is flagged v3_unsupported — "
+                        f"falling back to pip_v2 for this render instead of pip_v3_chromakey"
+                    )
+                    _gen_fn = generate_video_multiscene
             else:
                 _gen_fn = generate_video_multiscene
             logger.info(f"[anchor] Video style: {video_style!r} → {_gen_fn.__name__}")

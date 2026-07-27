@@ -513,6 +513,54 @@ async def test_anchor_agent_dispatches_pip_v3_chromakey_and_skips_polling(monkey
 
 
 @pytest.mark.asyncio
+async def test_anchor_agent_falls_back_to_pip_v2_for_v3_unsupported_avatar(monkeypatch):
+    """
+    Regression guard: a show flipped to pip_v3_chromakey must not hard-fail
+    every Daniel Mercer story just because his avatar is flagged
+    v3_unsupported (background never honored under v3 — see
+    HEYGEN_V3_MIGRATION_PLAN.md sec 4a). Must transparently fall back to
+    pip_v2 instead of calling the chromakey generator at all.
+    """
+    import agents.anchor.agent as agent_module
+
+    agent = agent_module.Agent()
+
+    monkeypatch.setattr(agent_module, "get_heygen_credits", lambda: 10_000)
+    monkeypatch.setattr(agent_module, "prepare_enhanced_background", lambda bg_id, layers: (bg_id, None, False, None))
+
+    def _chromakey_should_not_be_called(*a, **k):
+        raise AssertionError("Must not call the chromakey generator for a v3_unsupported avatar")
+
+    def fake_v2_gen(segments, avatar_id, voice_id, bg_id, title,
+                    voice_emotion, talking_style, expression, avatar_position,
+                    bg_bytes_override):
+        return {"video_id": "v2-id", "status": "processing", "scene_count": 1, "uploaded_composites": []}
+
+    async def fake_poll(self, video_id):
+        return {"video_url": "https://cdn.example.com/v2-fallback.mp4", "thumbnail_url": ""}
+
+    monkeypatch.setattr(agent_module, "generate_video_multiscene_v3_chromakey", _chromakey_should_not_be_called)
+    monkeypatch.setattr(agent_module, "generate_video_multiscene", fake_v2_gen)
+    monkeypatch.setattr(agent_module.Agent, "_poll_until_complete", fake_poll)
+
+    message = (
+        "AVATAR ID: cbc2c423747542eda390ffaeb269202c\n"  # Daniel Mercer — v3_unsupported
+        "VOICE ID: voice-123\n"
+        "BACKGROUND ASSET ID: bg-123\n"
+        "DESK_SLUG: entertainment_test_desk_not_configured\n"
+        "VIDEO STYLE: pip_v3_chromakey\n\n"
+        "=== SCRIPT ===\n"
+        "Good evening, this is a test broadcast.\n\n"
+        "Now perform your role.\n"
+    )
+
+    result = await agent.process_message(message)
+
+    assert result["success"] is True
+    assert result["video_url"] == "https://cdn.example.com/v2-fallback.mp4"
+
+
+@pytest.mark.asyncio
 async def test_anchor_agent_defaults_to_pip_v2_when_no_style_tag(monkeypatch):
     import agents.anchor.agent as agent_module
 
