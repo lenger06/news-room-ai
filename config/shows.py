@@ -30,6 +30,10 @@ class Show:
     desk_anchors: dict[str, DeskAssignment] = field(default_factory=dict)
     background_asset_id: str = ""                          # overrides desk background when set
     video_style: str = "pip_v2"                           # "pip_v2" = PiP overlay (v2 API) | "fullscreen_v3" = full-screen cuts (v3 API)
+                                                            # | "pip_v3_chromakey" = v3 greenscreen avatar composited locally onto the
+                                                            #   same studio background/PiP pipeline as pip_v2 (see HEYGEN_V3_MIGRATION_PLAN.md).
+                                                            #   Opt-in only — no show uses this yet; anchors flagged v3_unsupported in
+                                                            #   config/anchors.py (currently just Daniel Mercer) will fail if assigned this style.
 
     def anchor_for_desk(self, desk_slug: str) -> Optional[DeskAssignment]:
         """Return the desk assignment, or None if the desk isn't listed for this show."""

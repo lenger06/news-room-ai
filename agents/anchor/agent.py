@@ -13,7 +13,7 @@ import requests
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from agents.registry import BaseAgent, AgentInfo
-from tools.heygen_tool import get_heygen_credits, generate_video_multiscene, generate_video_multiscene_v3, delete_heygen_asset, prepare_enhanced_background
+from tools.heygen_tool import get_heygen_credits, generate_video_multiscene, generate_video_multiscene_v3, generate_video_multiscene_v3_chromakey, delete_heygen_asset, prepare_enhanced_background
 from config.overlays import get_background_layers
 from config.settings import settings
 
@@ -524,7 +524,12 @@ class Agent(BaseAgent):
             title = re.search(r'TOPIC[ \t]*:[ \t]*([^\n]+)', message, re.IGNORECASE)
             title = title.group(1).strip() if title else "News Segment"
 
-            _gen_fn = generate_video_multiscene_v3 if video_style == "fullscreen_v3" else generate_video_multiscene
+            if video_style == "fullscreen_v3":
+                _gen_fn = generate_video_multiscene_v3
+            elif video_style == "pip_v3_chromakey":
+                _gen_fn = generate_video_multiscene_v3_chromakey
+            else:
+                _gen_fn = generate_video_multiscene
             logger.info(f"[anchor] Video style: {video_style!r} → {_gen_fn.__name__}")
             submit_result = await asyncio.to_thread(
                 _gen_fn,
@@ -540,23 +545,30 @@ class Agent(BaseAgent):
 
             video_id = submit_result["video_id"]
             scene_count = submit_result.get("scene_count", 1)
-            logger.info(f"[anchor] Submitted. video_id={video_id}, scenes={scene_count}. Polling...")
 
-            # Step 6: Poll until complete
-            poll_task = asyncio.create_task(self._poll_until_complete(video_id))
-            _active_polls[video_id] = poll_task
-            try:
-                poll_result = await poll_task
-            except asyncio.CancelledError:
-                logger.info(f"[anchor] Poll for {video_id} cancelled")
-                return {
-                    "success": False,
-                    "response": f"Polling cancelled for video {video_id}. It may still be rendering in HeyGen.",
-                    "agent": "anchor",
-                    "video_id": video_id,
-                }
-            finally:
-                _active_polls.pop(video_id, None)
+            if submit_result.get("status") == "completed":
+                # pip_v3_chromakey does render+download+composite synchronously in
+                # the generator itself — there's no separate HeyGen render job left
+                # to poll, so skip straight to using the result as-is.
+                logger.info(f"[anchor] {video_style!r} completed synchronously. video_id={video_id}")
+                poll_result = submit_result
+            else:
+                logger.info(f"[anchor] Submitted. video_id={video_id}, scenes={scene_count}. Polling...")
+                # Step 6: Poll until complete
+                poll_task = asyncio.create_task(self._poll_until_complete(video_id))
+                _active_polls[video_id] = poll_task
+                try:
+                    poll_result = await poll_task
+                except asyncio.CancelledError:
+                    logger.info(f"[anchor] Poll for {video_id} cancelled")
+                    return {
+                        "success": False,
+                        "response": f"Polling cancelled for video {video_id}. It may still be rendering in HeyGen.",
+                        "agent": "anchor",
+                        "video_id": video_id,
+                    }
+                finally:
+                    _active_polls.pop(video_id, None)
 
             if "error" in poll_result:
                 return {

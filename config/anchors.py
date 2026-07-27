@@ -15,6 +15,14 @@ class AvatarLook:
     avatar_id: str
     description: str        # e.g. "formal suit at news desk", "casual blazer standing", "outdoor live shot"
     avatar_position: str = "center"  # "left" | "center" | "right" — where the avatar sits in frame
+    # V3 chromakey migration (see HEYGEN_V3_MIGRATION_PLAN.md sec 3/4a) — capability of this
+    # specific avatar_id, not a free choice. Populated from the read-only roster audit.
+    v3_engine: str = "avatar_v"                # "avatar_v" | "avatar_iv" | "avatar_iii"
+    v3_supports_motion_prompt: bool = True     # False for avatar_iii (studio_avatar stock library)
+    v3_fit: Optional[str] = None               # "contain" required for studio_avatar-type looks
+    v3_unsupported: bool = False               # True = this look can't do Option D at all (see plan doc)
+    v3_key_color: str = "#00FF00"               # chromakey background color — override to blue for
+                                                 # looks whose wardrobe is itself green (avoids keying out clothing)
 
 
 @dataclass
@@ -56,9 +64,9 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Shawn Green",
         avatars=[
-            AvatarLook("Shawn_Suit_Front_public", "formal suit, neutral backdrop, Standing — international affairs and geopolitics"),           # HeyGen: "Shawn Suit Front"
-            AvatarLook("Shawn_Sitting_Front_public", "formal suit, neutral backdrop, Sitting — international affairs and geopolitics"),            # HeyGen: "Shawn Sitting Front"
-            AvatarLook("Shawn_Casual_Sitting_Front_public", "casual, neutral backdrop, Sitting — international affairs and geopolitics"),           # HeyGen: "Shawn Casual Sitting Front"
+            AvatarLook("Shawn_Suit_Front_public", "formal suit, neutral backdrop, Standing — international affairs and geopolitics", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),           # HeyGen: "Shawn Suit Front"
+            AvatarLook("Shawn_Sitting_Front_public", "formal suit, neutral backdrop, Sitting — international affairs and geopolitics", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),            # HeyGen: "Shawn Sitting Front"
+            AvatarLook("Shawn_Casual_Sitting_Front_public", "casual, neutral backdrop, Sitting — international affairs and geopolitics", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),           # HeyGen: "Shawn Casual Sitting Front"
             # AvatarLook("<avatar_id>", "field jacket, outdoor — war zone and conflict reporting"),
             # AvatarLook("<avatar_id>", "business casual — diplomatic and economic foreign stories"),
         ],
@@ -112,9 +120,9 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Monica Hayes", # Saskia
         avatars=[
-            AvatarLook("Saskia_public_1", "Blue Blazer, Morning news, entertainment and lifestyle stories"),   # HeyGen: "Saskia in Blue blazer"
-            AvatarLook("Saskia_public_3", "Gray Vest, Morning news, entertainment and lifestyle stories"),    # HeyGen: "Saskia in Grey vest"
-            AvatarLook("Saskia_public_4", "Green Blazer, Morning news, entertainment and lifestyle stories"), # HeyGen: "Saskia in Green blazer"
+            AvatarLook("Saskia_public_1", "Blue Blazer, Morning news, entertainment and lifestyle stories", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),   # HeyGen: "Saskia in Blue blazer"
+            AvatarLook("Saskia_public_3", "Gray Vest, Morning news, entertainment and lifestyle stories", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),    # HeyGen: "Saskia in Grey vest"
+            AvatarLook("Saskia_public_4", "Green Blazer, Morning news, entertainment and lifestyle stories", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain", v3_key_color="#0000FF"), # HeyGen: "Saskia in Green blazer" — blue key: green wardrobe would key out on a green screen
              
             # AvatarLook("<avatar_id>", "standing in front of Capitol backdrop — election night and major votes"),
         ],
@@ -128,8 +136,8 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Valerie Brooks", # Candace
         avatars=[
-            AvatarLook("Candace_Beige_Dress_Front", "Beige Dress, Morning news, entertainment and lifestyle stories"),  # HeyGen: "Candace in Beige Dress (Front)"
-            AvatarLook("Candace_Pink_Blazer_Front", "Pink Blazer, Morning news, entertainment and lifestyle stories"),  # HeyGen: "Candace in Pink Blazer (Front)"
+            AvatarLook("Candace_Beige_Dress_Front", "Beige Dress, Morning news, entertainment and lifestyle stories", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),  # HeyGen: "Candace in Beige Dress (Front)"
+            AvatarLook("Candace_Pink_Blazer_Front", "Pink Blazer, Morning news, entertainment and lifestyle stories", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),  # HeyGen: "Candace in Pink Blazer (Front)"
              
             # AvatarLook("<avatar_id>", "standing in front of Capitol backdrop — election night and major votes"),
         ],
@@ -173,7 +181,10 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Daniel Mercer",
         avatars=[
-            AvatarLook("cbc2c423747542eda390ffaeb269202c", "formal suit standing in the main studio — hard news, breaking stories"),  # HeyGen: "Daniel Mercer"
+            # v3_unsupported CONFIRMED (HEYGEN_V3_MIGRATION_PLAN.md sec 4a) — both avatar_iv and
+            # avatar_v silently substitute flat gray for any requested background color (retested
+            # 2026-07-27); avatar_iv also rejects motion_prompt outright. Not fixable client-side.
+            AvatarLook("cbc2c423747542eda390ffaeb269202c", "formal suit standing in the main studio — hard news, breaking stories", v3_unsupported=True),  # HeyGen: "Daniel Mercer"
             # AvatarLook("<avatar_id>", "casual blazer, standing — feature stories and human interest"),
             # AvatarLook("<avatar_id>", "outdoor live shot — field reports and on-location coverage"),
         ],
@@ -199,7 +210,7 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Brandon Jones",
         avatars=[
-            AvatarLook("Brandon_expressive2_public", "business suit, expressive — markets, earnings, economic news"),  # HeyGen: "Brandon in Grey Suit"
+            AvatarLook("Brandon_expressive2_public", "business suit, expressive — markets, earnings, economic news", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),  # HeyGen: "Brandon in Grey Suit"
             # AvatarLook("<avatar_id>", "casual blazer — startup and tech business stories"),
         ],
         voice_id="3787b4ab93174952a3ad649209f1029a",
@@ -211,7 +222,7 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Alister Blackwood",
         avatars=[
-            AvatarLook("Dexter_Suit_Front_public", "dark formal suit, serious — investigative and accountability journalism"),  # HeyGen: "Dexter Suit Front"
+            AvatarLook("Dexter_Suit_Front_public", "dark formal suit, serious — investigative and accountability journalism", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),  # HeyGen: "Dexter Suit Front"
             # AvatarLook("<avatar_id>", "casual, no tie — long-form documentary style"),
         ],
         voice_id="088da045d8114ca39add4a75df8ed9a0",
@@ -223,7 +234,7 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Darlene Smith",
         avatars=[
-            AvatarLook("cae4682f73324118b402da17dcbb1b68", "clean studio look — health, medicine, and science reporting"),  # HeyGen: "Crystal Veil"
+            AvatarLook("cae4682f73324118b402da17dcbb1b68", "clean studio look — health, medicine, and science reporting", v3_engine="avatar_iv"),  # HeyGen: "Crystal Veil" — no avatar_v support, iv still has motion_prompt
             # AvatarLook("<avatar_id>", "lab or clinical backdrop — medical research and public health"),
         ],
         voice_id="d6a657274b184772ac28a6146f729d3a",
@@ -292,6 +303,17 @@ ANCHORS: list[Anchor] = [
 _DESK_MAP: dict[str, list[Anchor]] = {}
 for _a in ANCHORS:
     _DESK_MAP.setdefault(_a.desk, []).append(_a)
+
+# ── Avatar-id-indexed lookup (V3 chromakey capability per look) ────────────────
+_LOOK_BY_AVATAR_ID: dict[str, AvatarLook] = {}
+for _a in ANCHORS:
+    for _lk in _a.avatars:
+        _LOOK_BY_AVATAR_ID[_lk.avatar_id] = _lk
+
+
+def get_look_by_avatar_id(avatar_id: str) -> Optional[AvatarLook]:
+    """Return the AvatarLook for a given avatar_id, or None if not in the roster."""
+    return _LOOK_BY_AVATAR_ID.get(avatar_id)
 
 
 def get_anchor(name: Optional[str] = None, desk: Optional[str] = None) -> "Anchor":

@@ -1004,6 +1004,25 @@ def generate_video_multiscene(
         return {"error": str(e), "video_id": None}
 
 
+def _concatenate_segment_scripts(segments: list) -> str:
+    """
+    Concatenate all segment scripts into one continuous take (v3 avatar-type is
+    single-scene only, so every v3 path needs this). Collapses whitespace so TTS
+    doesn't stumble on embedded newlines, and truncates to HeyGen's 5000 char limit.
+    """
+    import re as _re2
+    full_script = " ".join(
+        _normalize_tts((seg.get("script") or "").strip())
+        for seg in segments
+        if (seg.get("script") or "").strip()
+    )
+    full_script = _re2.sub(r'\s+', ' ', full_script).strip()
+    if len(full_script) > 5000:
+        logger.warning(f"[heygen-v3] Script truncated from {len(full_script)} to 5000 chars")
+        full_script = full_script[:5000]
+    return full_script
+
+
 def _make_anchor_scene_v3(
     script: str,
     avatar_id: str,
@@ -1072,20 +1091,9 @@ def generate_video_multiscene_v3(
     if not settings.HEYGEN_API_KEY:
         return {"error": "HEYGEN_API_KEY not configured", "video_id": None}
 
-    # Concatenate all segment scripts — collapse whitespace so TTS doesn't stumble on \n\n
-    import re as _re2
-    full_script = " ".join(
-        _normalize_tts((seg.get("script") or "").strip())
-        for seg in segments
-        if (seg.get("script") or "").strip()
-    )
-    full_script = _re2.sub(r'\s+', ' ', full_script).strip()
+    full_script = _concatenate_segment_scripts(segments)
     if not full_script:
         return {"error": "No valid segments to render", "video_id": None}
-
-    if len(full_script) > 5000:
-        logger.warning(f"[heygen-v3] Script truncated from {len(full_script)} to 5000 chars")
-        full_script = full_script[:5000]
 
     # v3 type:"avatar" only accepts background type "color" or "image" — video is rejected.
     # Strategy:
@@ -1199,6 +1207,332 @@ def generate_video_multiscene_v3(
     except Exception as e:
         logger.error(f"[heygen-v3] avatar generate error: {e}", exc_info=True)
         return {"error": str(e), "video_id": None}
+
+
+# ── Option D: v3 greenscreen avatar + local FFmpeg chromakey composite ─────────
+# See HEYGEN_V3_MIGRATION_PLAN.md sec 4a/8. Keeps 100% of the pip_v2 background/PiP
+# pipeline; only the avatar clip's origin changes (v3 greenscreen render instead of
+# HeyGen's own v2 server-side matting).
+
+_V3_CHROMAKEY_POLL_INTERVAL_S = 30
+_V3_CHROMAKEY_MAX_POLL_ATTEMPTS = 60  # 30 minutes
+
+
+def _poll_v3_video_sync(video_id: str) -> dict:
+    """Blocking poll of a v3 video job until completed/failed/timeout. Returns the final `data` dict, or {"error": ...}."""
+    time.sleep(15)
+    for attempt in range(1, _V3_CHROMAKEY_MAX_POLL_ATTEMPTS + 1):
+        try:
+            resp = requests.get(
+                f"{HEYGEN_BASE_URL}/v3/videos/{video_id}",
+                headers={"x-api-key": settings.HEYGEN_API_KEY},
+                timeout=30,
+            )
+            if not resp.ok:
+                return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+            data = resp.json().get("data", {})
+            status = data.get("status", "unknown")
+            logger.info(f"[heygen-v3-chromakey] Poll {attempt}/{_V3_CHROMAKEY_MAX_POLL_ATTEMPTS} video {video_id}: {status}")
+            if status == "completed":
+                return data
+            if status == "failed":
+                detail = data.get("error") or data.get("msg") or "unknown"
+                return {"error": f"HeyGen render failed: {detail}"}
+        except Exception as e:
+            logger.warning(f"[heygen-v3-chromakey] Poll error: {e}")
+        if attempt < _V3_CHROMAKEY_MAX_POLL_ATTEMPTS:
+            time.sleep(_V3_CHROMAKEY_POLL_INTERVAL_S)
+    return {"error": f"Timed out waiting for video {video_id}"}
+
+
+def _render_avatar_clip_v3_greenscreen(
+    full_script: str,
+    avatar_id: str,
+    voice_id: str,
+    engine: str,
+    key_color: str,
+    supports_motion_prompt: bool,
+    fit: str | None,
+    motion_prompt: str,
+    title: str,
+) -> tuple[bytes | None, str | None]:
+    """
+    Submit + poll + download a single-scene v3 avatar clip against a solid
+    chromakey-color background. Returns (clip_bytes, error) — clip_bytes is
+    None on any failure, with error set to a human-readable message.
+    """
+    payload: dict = {
+        "type": "avatar",
+        "avatar_id": avatar_id,
+        "script": full_script,
+        "voice_id": voice_id,
+        "background": {"type": "color", "value": key_color},
+        "engine": {"type": engine},
+        "resolution": "1080p",
+        "aspect_ratio": "16:9",
+        "title": title,
+    }
+    if supports_motion_prompt:
+        payload["motion_prompt"] = motion_prompt
+    if fit:
+        payload["fit"] = fit
+
+    logger.info(
+        f"[heygen-v3-chromakey] Submitting greenscreen avatar payload "
+        f"({len(full_script)} chars, engine={engine}, fit={fit!r})"
+    )
+
+    try:
+        resp = requests.post(
+            f"{HEYGEN_BASE_URL}/v3/videos",
+            headers={"x-api-key": settings.HEYGEN_API_KEY, "Content-Type": "application/json"},
+            json=payload, timeout=60,
+        )
+        if not resp.ok:
+            return None, f"HeyGen v3 HTTP {resp.status_code}: {resp.text[:200]}"
+        data = resp.json().get("data", {})
+        video_id = data.get("video_id") or data.get("id")
+        if not video_id:
+            return None, f"No video_id in HeyGen response: {resp.text[:200]}"
+    except Exception as e:
+        return None, f"Submit error: {e}"
+
+    result = _poll_v3_video_sync(video_id)
+    if "error" in result:
+        return None, result["error"]
+
+    video_url = result.get("video_url")
+    if not video_url:
+        return None, "Render completed but no video_url returned"
+
+    try:
+        dl = requests.get(video_url, timeout=180)
+        if not dl.ok or not dl.content:
+            return None, f"Failed to download rendered clip: HTTP {dl.status_code}"
+        logger.info(f"[heygen-v3-chromakey] Downloaded greenscreen clip ({len(dl.content):,} bytes)")
+        return dl.content, None
+    except Exception as e:
+        return None, f"Download error: {e}"
+
+
+def _build_v3_chromakey_background(
+    segments: list,
+    background_asset_id: str,
+    bg_bytes_override: bytes | None,
+    pip_position: str,
+) -> bytes | None:
+    """
+    Build the background these greenscreen clips composite onto — the same studio
+    backdrop pip_v2 uses, with the first b-roll item found (if any) as a looping
+    PiP inset. Unlike pip_v2's per-scene backgrounds, this is a single continuous
+    background for the whole take, since v3 avatar-type is single-scene only — a
+    known, deliberate Phase 1 limitation (see HEYGEN_V3_MIGRATION_PLAN.md sec 8).
+    """
+    bg_bytes = bg_bytes_override or _get_background_video_bytes(background_asset_id)
+    if not bg_bytes:
+        return None
+
+    for seg in segments:
+        video_url = (seg.get("video_url") or "").strip()
+        image_url = (seg.get("image_url") or "").strip()
+        if video_url:
+            broll_bytes = _download_broll_video(video_url)
+            if broll_bytes:
+                composite = _create_broll_video_composite_from_video(broll_bytes, bg_bytes, pip_position=pip_position)
+                if composite:
+                    return composite
+            break
+        if image_url:
+            try:
+                r = requests.get(image_url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+                if r.ok and r.content:
+                    composite = _create_broll_video_composite(r.content, bg_bytes, pip_position=pip_position)
+                    if composite:
+                        return composite
+            except Exception as e:
+                logger.warning(f"[heygen-v3-chromakey] B-roll image download failed: {e}")
+            break
+
+    return bg_bytes
+
+
+def _chromakey_composite(
+    avatar_clip_bytes: bytes,
+    background_bytes: bytes,
+    key_color: str,
+    avatar_position: str,
+) -> bytes | None:
+    """
+    FFmpeg: chromakey the greenscreen avatar clip and overlay it onto the
+    (looping) background, shifted per avatar_position using the same
+    _AVATAR_OFFSET_X fractions pip_v2 already uses. Returns final MP4 bytes,
+    or None on failure.
+    """
+    ffmpeg = _get_ffmpeg_exe()
+    if not ffmpeg:
+        return None
+
+    key_hex = key_color.lstrip("#").lower()
+    try:
+        r, g, b = int(key_hex[0:2], 16), int(key_hex[2:4], 16), int(key_hex[4:6], 16)
+    except ValueError:
+        r, g, b = 0, 255, 0
+    despill_type = "green" if g >= b else "blue"
+    offset_x = _AVATAR_OFFSET_X.get(avatar_position, 0.0)
+    overlay_x = f"{offset_x}*W" if offset_x else "0"
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            avatar_path = tmp / "avatar.mp4"
+            bg_path = tmp / "bg.mp4"
+            out_path = tmp / "composite.mp4"
+            avatar_path.write_bytes(avatar_clip_bytes)
+            bg_path.write_bytes(background_bytes)
+
+            cmd = [
+                ffmpeg, "-y",
+                "-stream_loop", "-1", "-i", str(bg_path),
+                "-i", str(avatar_path),
+                "-filter_complex",
+                f"[0:v]scale={_FRAME_W}:{_FRAME_H}[bg];"
+                f"[1:v]scale={_FRAME_W}:{_FRAME_H},chromakey=0x{key_hex}:0.10:0.15,despill=type={despill_type}[keyed];"
+                f"[bg][keyed]overlay={overlay_x}:0:shortest=1[out]",
+                "-map", "[out]", "-map", "1:a",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                "-c:a", "aac",
+                str(out_path),
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=600)
+            if result.returncode != 0:
+                logger.warning(
+                    f"[heygen-v3-chromakey] FFmpeg composite failed (rc={result.returncode}): "
+                    f"{result.stderr.decode(errors='replace')[-800:]}"
+                )
+                return None
+            data = out_path.read_bytes()
+            logger.info(f"[heygen-v3-chromakey] Composite created ({len(data):,} bytes)")
+            return data
+    except Exception as e:
+        logger.warning(f"[heygen-v3-chromakey] _chromakey_composite error: {e}")
+        return None
+
+
+def _fetch_asset_download_url(asset_id: str) -> str | None:
+    """Fetch the public download URL for a previously-uploaded HeyGen asset."""
+    if not settings.HEYGEN_API_KEY:
+        return None
+    try:
+        resp = requests.get(
+            f"{HEYGEN_BASE_URL}/v1/asset/{asset_id}",
+            headers={"x-api-key": settings.HEYGEN_API_KEY},
+            timeout=15,
+        )
+        if resp.ok:
+            data = resp.json().get("data", {})
+            return data.get("url") or data.get("download_url")
+    except Exception as e:
+        logger.warning(f"[heygen-v3-chromakey] Could not fetch asset URL for {asset_id}: {e}")
+    return None
+
+
+def generate_video_multiscene_v3_chromakey(
+    segments: list,
+    avatar_id: str,
+    voice_id: str,
+    background_asset_id: str,
+    title: str = "News Segment",
+    voice_emotion: str = "",
+    talking_style: str = "",
+    expression: str = "",
+    avatar_position: str = "center",
+    bg_bytes_override: bytes | None = None,
+    motion_prompt: str = _NEWS_ANCHOR_MOTION_PROMPT,
+) -> dict:
+    """
+    Option D: render the avatar via v3 against an explicit chromakey background,
+    then composite it locally with FFmpeg onto the same studio background/PiP
+    pipeline pip_v2 already uses. See HEYGEN_V3_MIGRATION_PLAN.md sec 4a/8.
+
+    Unlike the other generate_* functions, this does the full render + download +
+    composite synchronously and returns status="completed" directly — there is no
+    separate HeyGen render job left to poll for the final output. Callers should
+    skip their usual poll-until-complete step when they see this status.
+
+    voice_emotion/talking_style/expression are accepted for call-signature parity
+    with generate_video_multiscene/generate_video_multiscene_v3 but unused here —
+    v3's avatar endpoint has no equivalent fields (voice_settings.emotion is
+    rejected; talking_style/expression are talking_photo-only v2 concepts).
+
+    Returns {"video_id", "status": "completed", "video_url", "thumbnail_url": "",
+             "scene_count", "uploaded_composites": []} or {"error": ..., "video_id": None}.
+    """
+    from config.anchors import get_look_by_avatar_id
+
+    if not settings.HEYGEN_API_KEY:
+        return {"error": "HEYGEN_API_KEY not configured", "video_id": None}
+
+    look = get_look_by_avatar_id(avatar_id)
+    if look and look.v3_unsupported:
+        return {
+            "error": (
+                f"Avatar {avatar_id} is flagged v3_unsupported (see "
+                f"HEYGEN_V3_MIGRATION_PLAN.md sec 4a) — use pip_v2 for this anchor "
+                f"until resolved"
+            ),
+            "video_id": None,
+        }
+
+    engine = look.v3_engine if look else "avatar_iv"
+    supports_motion_prompt = look.v3_supports_motion_prompt if look else True
+    fit = look.v3_fit if look else None
+    key_color = look.v3_key_color if look else "#00FF00"
+
+    full_script = _concatenate_segment_scripts(segments)
+    if not full_script:
+        return {"error": "No valid segments to render", "video_id": None}
+
+    pip_position = _PIP_FROM_AVATAR.get(avatar_position, "left")
+
+    logger.info(
+        f"[heygen-v3-chromakey] avatar={avatar_id} engine={engine} "
+        f"motion_prompt={supports_motion_prompt} fit={fit!r} key={key_color}"
+    )
+
+    clip_bytes, err = _render_avatar_clip_v3_greenscreen(
+        full_script, avatar_id, voice_id, engine, key_color,
+        supports_motion_prompt, fit, motion_prompt, title,
+    )
+    if err:
+        return {"error": f"Greenscreen render failed: {err}", "video_id": None}
+
+    background_bytes = _build_v3_chromakey_background(
+        segments, background_asset_id, bg_bytes_override, pip_position
+    )
+    if not background_bytes:
+        return {"error": "Could not build background video for chromakey composite", "video_id": None}
+
+    composite_bytes = _chromakey_composite(clip_bytes, background_bytes, key_color, avatar_position)
+    if not composite_bytes:
+        return {"error": "FFmpeg chromakey composite failed", "video_id": None}
+
+    asset_id = _upload_video_asset(composite_bytes)
+    if not asset_id:
+        return {"error": "Failed to upload final composite to HeyGen", "video_id": None}
+
+    video_url = _fetch_asset_download_url(asset_id)
+    if not video_url:
+        return {"error": "Composite uploaded but could not fetch a download URL", "video_id": None}
+
+    logger.info(f"[heygen-v3-chromakey] Final composite ready: {video_url}")
+    return {
+        "video_id": asset_id,
+        "status": "completed",
+        "video_url": video_url,
+        "thumbnail_url": "",
+        "scene_count": len(segments),
+        "uploaded_composites": [],
+    }
 
 
 @tool
