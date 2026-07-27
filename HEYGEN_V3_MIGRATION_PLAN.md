@@ -6,10 +6,17 @@ had background problems, and define a path off V1/V2 that never interrupts
 the currently-live `pip_v2` shows until a V3 replacement is proven equal or
 better.
 
-**Status (2026-07-27): Phase 1 implemented.** The `pip_v3_chromakey` video
-style exists and is fully tested (mocked + one real-FFmpeg smoke test), but
-is not the default for any show — `pip_v2` is untouched. See §8 for what was
-built and §9 for what's left before a Phase 2 pilot.
+**Status (2026-07-27): Phase 1 implemented and live-validated end-to-end.**
+The `pip_v3_chromakey` video style exists, is fully tested (mocked + real
+FFmpeg smoke tests), and has now been run for real against 4 avatars via the
+actual production function (not hand-rolled payloads) — catching and fixing
+two real bugs in the process (see §10). It is not the default for any show —
+`pip_v2` is untouched. **One new, unresolved finding narrows the
+conclusion**: the `avatar_iii`/`studio_avatar` tier (a third of the roster)
+intermittently renders with a visible "Veo" watermark burned into the frame
+— confirmed live, not deterministic. The `avatar_iv`/`avatar_v` tier
+(most of the roster) is now genuinely confirmed clean. See §10 for the full
+writeup and §11 for the updated recommendation.
 
 **Bottom line up front:** the background problems weren't a bug in this
 codebase — they're a real, structural V3 platform limitation. No endpoint or
@@ -442,7 +449,7 @@ All steps below were implemented, tested, and merged. `pip_v2` is untouched —
    pip_v2 default, confirming polling is correctly skipped/used in each
    case). Plus `tests/test_heygen_chromakey_smoke.py` — real FFmpeg, no
    mocks, matching the pattern in `tests/test_video_editor_graphics_smoke.py`.
-   Full suite: 127 passed, 0 failures, 0 regressions.
+   Full suite (updated after §10's live-testing fixes): 131 passed, 0 failures.
 
 ---
 
@@ -467,3 +474,103 @@ either way. These are the deliberate next decisions:
 3. **Daniel Mercer.** Still needs (a) a HeyGen support answer on why this
    specific avatar doesn't honor background color, or (b) a decision to hold
    him on `pip_v2` indefinitely once V1/V2's actual sunset date is known (§6).
+
+---
+
+## 10. Live end-to-end validation (2026-07-27) — two bugs found and fixed, one new platform risk found
+
+Ran `generate_video_multiscene_v3_chromakey()` for real — the actual
+production function, not a hand-rolled payload — against four avatars
+chosen to cover cases the earlier Postman testing hadn't: Zayne Carter
+(sanity check on the real function), Shawn Green (avatar_iii tier on a
+previously-untested background bucket), Darlene Smith (the one look that
+resolves to avatar_iv with no avatar_v access — never exercised live before),
+and Brandon Jones with real b-roll (exercising the PiP-compositing branch for
+the first time).
+
+**Bug 1 — final video URL never resolved.** All four renders actually
+completed successfully through render → download → composite, but every one
+failed at the last step with "could not fetch a download URL." Root cause:
+`_fetch_asset_download_url()` made a `GET /v1/asset/{id}` call against
+`api.heygen.com` to resolve a URL for the just-uploaded composite — that
+call 404s for assets uploaded via `upload.heygen.com` (confirmed with a
+minimal diagnostic upload). The upload response already contains the public
+URL directly (`data.url`, e.g.
+`https://resource2.heygen.ai/video/{id}/original.mp4`). Fixed by replacing
+`_fetch_asset_download_url()` with `_upload_final_composite()`, which reads
+the URL straight from the upload response — no second call needed. Regression
+test added (`test_upload_final_composite_reads_url_from_upload_response_not_a_second_call`).
+
+**Bug 2 — the background color wasn't reliably honored.** After fixing Bug
+1, Zayne's composite showed him standing in an unrelated outdoor patio
+scene — the requested green background was silently ignored and HeyGen
+rendered some default backdrop instead, so the chromakey filter had nothing
+green to key out and passed the raw clip through untouched. Larry
+independently confirmed via Postman that adding `"remove_background": true`
+alongside the explicit `background` color fixes this — and this exact
+combination was present in my own earlier validated scratch test
+(`heygen_chromakey_test_zayne.py`) but got dropped when I wrote the
+production `_render_avatar_clip_v3_greenscreen()` function. Added it back —
+but not unconditionally: doing so for an `avatar_iii`/`studio_avatar` avatar
+returns HTTP 400 ("This video avatar does not support background removal.
+The avatar must be trained for matting"), confirmed live against both Shawn
+Green and Brandon Jones. So `remove_background` is now conditional on a new
+`AvatarLook.v3_supports_remove_background` field (mirrors
+`v3_supports_motion_prompt` — `True` for the full-access tier, `False` for
+`avatar_iii`-only looks). Four regression tests added covering both branches
+plus the roster-level payload shape.
+
+**New finding — intermittent "Veo" watermark on avatar_iii renders.** With
+both bugs fixed, all four avatars rendered successfully — but visual review
+of the actual output frames (not just the "completed" status) turned up
+something new: both `avatar_iii` renders (Shawn Green, Brandon Jones) have a
+visible **"Veo" watermark burned into the bottom-right corner** of the frame.
+Zayne (avatar_v) and Darlene (avatar_iv) have no such watermark. This looks
+at first like a hard rule ("avatar_iii routes through Google Veo, avatar_iv/v
+don't") — **except** the raw greenscreen frame from my *original* Shawn Green
+test earlier this session (same avatar, same engine, no `remove_background`)
+has no watermark at all. Same avatar, same engine, different outcome across
+two separate render attempts. **This is intermittent, not deterministic** —
+the exact mechanism (server load, A/B routing, something else) is unknown.
+This is a materially different kind of problem than Daniel Mercer's gray
+substitution (which fails the same way every time): a watermark that shows
+up unpredictably is much harder to guard against in code. Not encoded as
+`v3_unsupported` for this reason — that flag means "known to fail every
+time," which this isn't. Instead, added a prominent comment on
+`AvatarLook.v3_supports_motion_prompt` (the field that marks the whole
+avatar_iii tier) documenting the risk, and did **not** set
+`v3_chromakey_validated=True` for Shawn or Brandon.
+
+**Also confirmed by visual review:** a thin white/light fringe along hair and
+shoulder edges on both Zayne's and Darlene's composites — visible but minor,
+consistent with the chromakey edge/despill tuning already flagged as an open
+Phase 2 refinement in §4a/§9 (now empirically observed, not just anticipated).
+Brandon's b-roll PiP inset rendered correctly (confirms
+`_build_v3_chromakey_background`'s image-broll branch works against a real
+URL, not just the mocked unit tests).
+
+`config/anchors.py` now reflects all of this: `v3_chromakey_validated=True`
+only for the two specific avatar_ids actually reviewed (Zayne Carter's first
+look, Darlene Smith), `v3_supports_remove_background=False` for every
+`avatar_iii`-only look, and inline notes on Shawn's and Brandon's specific
+looks recording the mixed clean/watermarked results.
+
+## 11. Updated recommendation
+
+**Pilot on the `avatar_iv`/`avatar_v` (full-access) tier only, for now.**
+Zayne Carter and Darlene Smith are genuinely confirmed clean across multiple
+independent live tests. Do not pilot an `avatar_iii`-only anchor (Shawn
+Green, Brandon Jones, Monica Hayes/Saskia, Valerie Brooks/Candace, Alister
+Blackwood/Dexter) on `pip_v3_chromakey` until one of:
+  a. HeyGen support can explain/confirm the Veo-routing behavior for
+     avatar_iii and whether it can be disabled or avoided, or
+  b. A larger sample (more than 2 renders) establishes how often the
+     watermark actually appears — worth doing before ruling the tier out
+     entirely, since the very first Shawn Green test this session came back
+     clean, or
+  c. Automated post-render QA (e.g. checking the bottom-right corner region
+     for the watermark before a video ships) is built as a safety net.
+
+None of this changes §9's Phase 2 pilot recommendation for the full-access
+tier — Zayne Carter or Alexa Chen on `entertainment-weekly` remains a good
+first candidate.

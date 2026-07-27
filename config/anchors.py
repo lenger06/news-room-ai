@@ -18,11 +18,24 @@ class AvatarLook:
     # V3 chromakey migration (see HEYGEN_V3_MIGRATION_PLAN.md sec 3/4a) — capability of this
     # specific avatar_id, not a free choice. Populated from the read-only roster audit.
     v3_engine: str = "avatar_v"                # "avatar_v" | "avatar_iv" | "avatar_iii"
+    # KNOWN OPEN RISK for avatar_iii (2026-07-27): renders have intermittently come
+    # back with a visible "Veo" watermark burned into the frame (Google Veo appears
+    # to be an underlying renderer HeyGen sometimes routes avatar_iii through) — NOT
+    # deterministic, the exact same avatar/payload has rendered both clean and
+    # watermarked across different attempts. Not encoded as v3_unsupported since it
+    # doesn't fail every time, but do NOT pilot an avatar_iii anchor without visually
+    # reviewing the actual output first. See HEYGEN_V3_MIGRATION_PLAN.md sec 4a.
     v3_supports_motion_prompt: bool = True     # False for avatar_iii (studio_avatar stock library)
+    v3_supports_remove_background: bool = True  # False for avatar_iii/studio_avatar — HeyGen rejects
+                                                 # remove_background:true outright (HTTP 400 "not trained
+                                                 # for matting") for this tier; confirmed live 2026-07-27
     v3_fit: Optional[str] = None               # "contain" required for studio_avatar-type looks
     v3_unsupported: bool = False               # True = this look can't do Option D at all (see plan doc)
     v3_key_color: str = "#00FF00"               # chromakey background color — override to blue for
                                                  # looks whose wardrobe is itself green (avoids keying out clothing)
+    v3_chromakey_validated: bool = False        # True only after a real generate_video_multiscene_v3_chromakey()
+                                                 # render has been reviewed for this look — distinct from v3_engine
+                                                 # etc. above, which come from the read-only capability audit only
 
 
 @dataclass
@@ -64,9 +77,9 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Shawn Green",
         avatars=[
-            AvatarLook("Shawn_Suit_Front_public", "formal suit, neutral backdrop, Standing — international affairs and geopolitics", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),           # HeyGen: "Shawn Suit Front"
-            AvatarLook("Shawn_Sitting_Front_public", "formal suit, neutral backdrop, Sitting — international affairs and geopolitics", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),            # HeyGen: "Shawn Sitting Front"
-            AvatarLook("Shawn_Casual_Sitting_Front_public", "casual, neutral backdrop, Sitting — international affairs and geopolitics", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),           # HeyGen: "Shawn Casual Sitting Front"
+            AvatarLook("Shawn_Suit_Front_public", "formal suit, neutral backdrop, Standing — international affairs and geopolitics", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_supports_remove_background=False, v3_fit="contain"),           # HeyGen: "Shawn Suit Front" — tested 2026-07-27: one render clean, one render Veo-watermarked (see avatar_iii risk note above)
+            AvatarLook("Shawn_Sitting_Front_public", "formal suit, neutral backdrop, Sitting — international affairs and geopolitics", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_supports_remove_background=False, v3_fit="contain"),            # HeyGen: "Shawn Sitting Front"
+            AvatarLook("Shawn_Casual_Sitting_Front_public", "casual, neutral backdrop, Sitting — international affairs and geopolitics", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_supports_remove_background=False, v3_fit="contain"),           # HeyGen: "Shawn Casual Sitting Front"
             # AvatarLook("<avatar_id>", "field jacket, outdoor — war zone and conflict reporting"),
             # AvatarLook("<avatar_id>", "business casual — diplomatic and economic foreign stories"),
         ],
@@ -105,7 +118,7 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Zayne Carter", # Zayne
         avatars=[
-            AvatarLook("5c71aeacd9fc4b4f91c50312180f189b", "dress shirt , Entertainment news, entertainment and lifestyle stories"),  # HeyGen: "Zayne"
+            AvatarLook("5c71aeacd9fc4b4f91c50312180f189b", "dress shirt , Entertainment news, entertainment and lifestyle stories", v3_chromakey_validated=True),  # HeyGen: "Zayne" — real render reviewed 2026-07-27, clean key onto entertainment desk bg
             AvatarLook("1751694ccea0415eb8155ff49ce76255", "black suite , Entertainment news, entertainment and lifestyle stories"),  # HeyGen: "Zayne"
               
             # AvatarLook("<avatar_id>", "standing in front of Capitol backdrop — election night and major votes"),
@@ -120,9 +133,9 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Monica Hayes", # Saskia
         avatars=[
-            AvatarLook("Saskia_public_1", "Blue Blazer, Morning news, entertainment and lifestyle stories", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),   # HeyGen: "Saskia in Blue blazer"
-            AvatarLook("Saskia_public_3", "Gray Vest, Morning news, entertainment and lifestyle stories", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),    # HeyGen: "Saskia in Grey vest"
-            AvatarLook("Saskia_public_4", "Green Blazer, Morning news, entertainment and lifestyle stories", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain", v3_key_color="#0000FF"), # HeyGen: "Saskia in Green blazer" — blue key: green wardrobe would key out on a green screen
+            AvatarLook("Saskia_public_1", "Blue Blazer, Morning news, entertainment and lifestyle stories", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_supports_remove_background=False, v3_fit="contain"),   # HeyGen: "Saskia in Blue blazer"
+            AvatarLook("Saskia_public_3", "Gray Vest, Morning news, entertainment and lifestyle stories", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_supports_remove_background=False, v3_fit="contain"),    # HeyGen: "Saskia in Grey vest"
+            AvatarLook("Saskia_public_4", "Green Blazer, Morning news, entertainment and lifestyle stories", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_supports_remove_background=False, v3_fit="contain", v3_key_color="#0000FF"), # HeyGen: "Saskia in Green blazer" — blue key: green wardrobe would key out on a green screen
              
             # AvatarLook("<avatar_id>", "standing in front of Capitol backdrop — election night and major votes"),
         ],
@@ -136,8 +149,8 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Valerie Brooks", # Candace
         avatars=[
-            AvatarLook("Candace_Beige_Dress_Front", "Beige Dress, Morning news, entertainment and lifestyle stories", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),  # HeyGen: "Candace in Beige Dress (Front)"
-            AvatarLook("Candace_Pink_Blazer_Front", "Pink Blazer, Morning news, entertainment and lifestyle stories", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),  # HeyGen: "Candace in Pink Blazer (Front)"
+            AvatarLook("Candace_Beige_Dress_Front", "Beige Dress, Morning news, entertainment and lifestyle stories", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_supports_remove_background=False, v3_fit="contain"),  # HeyGen: "Candace in Beige Dress (Front)"
+            AvatarLook("Candace_Pink_Blazer_Front", "Pink Blazer, Morning news, entertainment and lifestyle stories", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_supports_remove_background=False, v3_fit="contain"),  # HeyGen: "Candace in Pink Blazer (Front)"
              
             # AvatarLook("<avatar_id>", "standing in front of Capitol backdrop — election night and major votes"),
         ],
@@ -210,7 +223,7 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Brandon Jones",
         avatars=[
-            AvatarLook("Brandon_expressive2_public", "business suit, expressive — markets, earnings, economic news", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),  # HeyGen: "Brandon in Grey Suit"
+            AvatarLook("Brandon_expressive2_public", "business suit, expressive — markets, earnings, economic news", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_supports_remove_background=False, v3_fit="contain"),  # HeyGen: "Brandon in Grey Suit" — tested 2026-07-27: Veo-watermarked (see avatar_iii risk note above)
             # AvatarLook("<avatar_id>", "casual blazer — startup and tech business stories"),
         ],
         voice_id="3787b4ab93174952a3ad649209f1029a",
@@ -222,7 +235,7 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Alister Blackwood",
         avatars=[
-            AvatarLook("Dexter_Suit_Front_public", "dark formal suit, serious — investigative and accountability journalism", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_fit="contain"),  # HeyGen: "Dexter Suit Front"
+            AvatarLook("Dexter_Suit_Front_public", "dark formal suit, serious — investigative and accountability journalism", v3_engine="avatar_iii", v3_supports_motion_prompt=False, v3_supports_remove_background=False, v3_fit="contain"),  # HeyGen: "Dexter Suit Front"
             # AvatarLook("<avatar_id>", "casual, no tie — long-form documentary style"),
         ],
         voice_id="088da045d8114ca39add4a75df8ed9a0",
@@ -234,7 +247,7 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Darlene Smith",
         avatars=[
-            AvatarLook("cae4682f73324118b402da17dcbb1b68", "clean studio look — health, medicine, and science reporting", v3_engine="avatar_iv"),  # HeyGen: "Crystal Veil" — no avatar_v support, iv still has motion_prompt
+            AvatarLook("cae4682f73324118b402da17dcbb1b68", "clean studio look — health, medicine, and science reporting", v3_engine="avatar_iv", v3_chromakey_validated=True),  # HeyGen: "Crystal Veil" — no avatar_v support, iv still has motion_prompt. Real render reviewed 2026-07-27, clean key onto health_science desk bg
             # AvatarLook("<avatar_id>", "lab or clinical backdrop — medical research and public health"),
         ],
         voice_id="d6a657274b184772ac28a6146f729d3a",

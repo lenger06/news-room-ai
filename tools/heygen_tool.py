@@ -1252,6 +1252,7 @@ def _render_avatar_clip_v3_greenscreen(
     engine: str,
     key_color: str,
     supports_motion_prompt: bool,
+    supports_remove_background: bool,
     fit: str | None,
     motion_prompt: str,
     title: str,
@@ -1272,6 +1273,16 @@ def _render_avatar_clip_v3_greenscreen(
         "aspect_ratio": "16:9",
         "title": title,
     }
+    if supports_remove_background:
+        # Without this, HeyGen has been observed to silently ignore the
+        # requested background color and fall back to some default backdrop
+        # instead (confirmed live 2026-07-27, Zayne Carter/avatar_iv) — the
+        # explicit color alone is not sufficient. But it's rejected outright
+        # (HTTP 400 "not trained for matting") for avatar_iii/studio_avatar
+        # looks, which is why this is conditional, not a hardcoded True
+        # (also confirmed live 2026-07-27, Shawn Green/Brandon Jones).
+        # See HEYGEN_V3_MIGRATION_PLAN.md sec 4a.
+        payload["remove_background"] = True
     if supports_motion_prompt:
         payload["motion_prompt"] = motion_prompt
     if fit:
@@ -1418,22 +1429,39 @@ def _chromakey_composite(
         return None
 
 
-def _fetch_asset_download_url(asset_id: str) -> str | None:
-    """Fetch the public download URL for a previously-uploaded HeyGen asset."""
-    if not settings.HEYGEN_API_KEY:
-        return None
+def _upload_final_composite(video_bytes: bytes) -> tuple[str | None, str | None]:
+    """
+    Upload the final chromakey composite to HeyGen and return (asset_id, url).
+
+    Unlike _upload_video_asset() (used for background/b-roll composites, which
+    only ever need the asset_id back), this needs a public URL too — and the
+    upload response already contains one directly. A follow-up
+    GET /v1/asset/{id} on api.heygen.com 404s for assets uploaded this way
+    (confirmed live 2026-07-27) — the upload host (upload.heygen.com) and the
+    read host (api.heygen.com) don't share that lookup, so don't round-trip
+    through it.
+    """
     try:
-        resp = requests.get(
-            f"{HEYGEN_BASE_URL}/v1/asset/{asset_id}",
-            headers={"x-api-key": settings.HEYGEN_API_KEY},
-            timeout=15,
+        resp = requests.post(
+            f"{HEYGEN_UPLOAD_URL}/v1/asset",
+            headers={"X-Api-Key": settings.HEYGEN_API_KEY, "Content-Type": "video/mp4"},
+            data=video_bytes,
+            timeout=120,
         )
-        if resp.ok:
-            data = resp.json().get("data", {})
-            return data.get("url") or data.get("download_url")
+        if not resp.ok:
+            logger.warning(
+                f"[heygen-v3-chromakey] Final composite upload failed: "
+                f"HTTP {resp.status_code} {resp.text[:200]}"
+            )
+            return None, None
+        data = resp.json().get("data", {})
+        asset_id = data.get("id")
+        url = data.get("url")
+        logger.info(f"[heygen-v3-chromakey] Final composite uploaded → {asset_id} ({url})")
+        return asset_id, url
     except Exception as e:
-        logger.warning(f"[heygen-v3-chromakey] Could not fetch asset URL for {asset_id}: {e}")
-    return None
+        logger.warning(f"[heygen-v3-chromakey] _upload_final_composite error: {e}")
+        return None, None
 
 
 def generate_video_multiscene_v3_chromakey(
@@ -1485,6 +1513,7 @@ def generate_video_multiscene_v3_chromakey(
 
     engine = look.v3_engine if look else "avatar_iv"
     supports_motion_prompt = look.v3_supports_motion_prompt if look else True
+    supports_remove_background = look.v3_supports_remove_background if look else True
     fit = look.v3_fit if look else None
     key_color = look.v3_key_color if look else "#00FF00"
 
@@ -1496,12 +1525,13 @@ def generate_video_multiscene_v3_chromakey(
 
     logger.info(
         f"[heygen-v3-chromakey] avatar={avatar_id} engine={engine} "
-        f"motion_prompt={supports_motion_prompt} fit={fit!r} key={key_color}"
+        f"motion_prompt={supports_motion_prompt} remove_background={supports_remove_background} "
+        f"fit={fit!r} key={key_color}"
     )
 
     clip_bytes, err = _render_avatar_clip_v3_greenscreen(
         full_script, avatar_id, voice_id, engine, key_color,
-        supports_motion_prompt, fit, motion_prompt, title,
+        supports_motion_prompt, supports_remove_background, fit, motion_prompt, title,
     )
     if err:
         return {"error": f"Greenscreen render failed: {err}", "video_id": None}
@@ -1516,13 +1546,9 @@ def generate_video_multiscene_v3_chromakey(
     if not composite_bytes:
         return {"error": "FFmpeg chromakey composite failed", "video_id": None}
 
-    asset_id = _upload_video_asset(composite_bytes)
-    if not asset_id:
+    asset_id, video_url = _upload_final_composite(composite_bytes)
+    if not asset_id or not video_url:
         return {"error": "Failed to upload final composite to HeyGen", "video_id": None}
-
-    video_url = _fetch_asset_download_url(asset_id)
-    if not video_url:
-        return {"error": "Composite uploaded but could not fetch a download URL", "video_id": None}
 
     logger.info(f"[heygen-v3-chromakey] Final composite ready: {video_url}")
     return {

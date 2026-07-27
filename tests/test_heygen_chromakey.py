@@ -183,15 +183,14 @@ def test_generate_v3_chromakey_happy_path_full_access_avatar(monkeypatch):
     captured_render_args = {}
 
     def fake_render(full_script, avatar_id, voice_id, engine, key_color,
-                     supports_motion_prompt, fit, motion_prompt, title):
+                     supports_motion_prompt, supports_remove_background, fit, motion_prompt, title):
         captured_render_args.update(locals())
         return b"greenscreen-bytes", None
 
     monkeypatch.setattr(heygen_tool, "_render_avatar_clip_v3_greenscreen", fake_render)
     monkeypatch.setattr(heygen_tool, "_build_v3_chromakey_background", lambda *a, **k: b"bg-bytes")
     monkeypatch.setattr(heygen_tool, "_chromakey_composite", lambda *a, **k: b"final-bytes")
-    monkeypatch.setattr(heygen_tool, "_upload_video_asset", lambda data: "final-asset-id")
-    monkeypatch.setattr(heygen_tool, "_fetch_asset_download_url", lambda asset_id: "https://cdn.example.com/final.mp4")
+    monkeypatch.setattr(heygen_tool, "_upload_final_composite", lambda data: ("final-asset-id", "https://cdn.example.com/final.mp4"))
 
     result = generate_video_multiscene_v3_chromakey(
         SEGMENTS,
@@ -203,9 +202,10 @@ def test_generate_v3_chromakey_happy_path_full_access_avatar(monkeypatch):
     assert result["video_url"] == "https://cdn.example.com/final.mp4"
     assert result["video_id"] == "final-asset-id"
     assert result["uploaded_composites"] == []
-    # Full-access avatar: engine=avatar_v, motion_prompt included, no fit override
+    # Full-access avatar: engine=avatar_v, motion_prompt + remove_background included, no fit override
     assert captured_render_args["engine"] == "avatar_v"
     assert captured_render_args["supports_motion_prompt"] is True
+    assert captured_render_args["supports_remove_background"] is True
     assert captured_render_args["fit"] is None
     assert captured_render_args["key_color"] == "#00FF00"
 
@@ -216,15 +216,14 @@ def test_generate_v3_chromakey_avatar_iii_look_omits_motion_prompt_and_sets_fit(
     captured_render_args = {}
 
     def fake_render(full_script, avatar_id, voice_id, engine, key_color,
-                     supports_motion_prompt, fit, motion_prompt, title):
+                     supports_motion_prompt, supports_remove_background, fit, motion_prompt, title):
         captured_render_args.update(locals())
         return b"greenscreen-bytes", None
 
     monkeypatch.setattr(heygen_tool, "_render_avatar_clip_v3_greenscreen", fake_render)
     monkeypatch.setattr(heygen_tool, "_build_v3_chromakey_background", lambda *a, **k: b"bg-bytes")
     monkeypatch.setattr(heygen_tool, "_chromakey_composite", lambda *a, **k: b"final-bytes")
-    monkeypatch.setattr(heygen_tool, "_upload_video_asset", lambda data: "final-asset-id")
-    monkeypatch.setattr(heygen_tool, "_fetch_asset_download_url", lambda asset_id: "https://cdn.example.com/final.mp4")
+    monkeypatch.setattr(heygen_tool, "_upload_final_composite", lambda data: ("final-asset-id", "https://cdn.example.com/final.mp4"))
 
     result = generate_video_multiscene_v3_chromakey(
         SEGMENTS,
@@ -235,6 +234,7 @@ def test_generate_v3_chromakey_avatar_iii_look_omits_motion_prompt_and_sets_fit(
     assert result["status"] == "completed"
     assert captured_render_args["engine"] == "avatar_iii"
     assert captured_render_args["supports_motion_prompt"] is False
+    assert captured_render_args["supports_remove_background"] is False
     assert captured_render_args["fit"] == "contain"
 
 
@@ -260,6 +260,42 @@ def test_generate_v3_chromakey_returns_error_when_background_build_fails(monkeyp
     )
     assert result["video_id"] is None
     assert "background" in result["error"].lower()
+
+
+def test_generate_v3_chromakey_returns_error_when_final_upload_fails(monkeypatch):
+    monkeypatch.setattr(heygen_tool.settings, "HEYGEN_API_KEY", "fake-key")
+    monkeypatch.setattr(heygen_tool, "_render_avatar_clip_v3_greenscreen", lambda *a, **k: (b"clip", None))
+    monkeypatch.setattr(heygen_tool, "_build_v3_chromakey_background", lambda *a, **k: b"bg")
+    monkeypatch.setattr(heygen_tool, "_chromakey_composite", lambda *a, **k: b"final")
+    monkeypatch.setattr(heygen_tool, "_upload_final_composite", lambda data: (None, None))
+    result = generate_video_multiscene_v3_chromakey(
+        SEGMENTS, "5c71aeacd9fc4b4f91c50312180f189b", "voice-id", "bg-id",
+    )
+    assert result["video_id"] is None
+    assert "upload" in result["error"].lower()
+
+
+# ── tools/heygen_tool.py: _upload_final_composite response parsing ────────────
+
+def test_upload_final_composite_reads_url_from_upload_response_not_a_second_call(monkeypatch):
+    """
+    Regression guard: HeyGen's asset upload response already contains a public
+    `url` — GET /v1/asset/{id} 404s for assets uploaded this way (confirmed
+    live 2026-07-27), so this must not make a second HTTP call to resolve it.
+    """
+    def fake_post(url, headers=None, data=None, timeout=None):
+        return _FakeResp(json_data={"data": {"id": "asset-123", "url": "https://resource2.heygen.ai/video/asset-123/original.mp4"}})
+
+    def fake_get(*a, **k):
+        raise AssertionError("Must not make a second request to resolve the asset URL")
+
+    monkeypatch.setattr(heygen_tool.requests, "post", fake_post)
+    monkeypatch.setattr(heygen_tool.requests, "get", fake_get)
+    monkeypatch.setattr(heygen_tool.settings, "HEYGEN_API_KEY", "fake-key")
+
+    asset_id, url = heygen_tool._upload_final_composite(b"fake-mp4-bytes")
+    assert asset_id == "asset-123"
+    assert url == "https://resource2.heygen.ai/video/asset-123/original.mp4"
 
 
 # ── tools/heygen_tool.py: _render_avatar_clip_v3_greenscreen payload shape ─────
@@ -295,7 +331,7 @@ def test_render_avatar_clip_v3_greenscreen_omits_motion_prompt_when_unsupported(
 
     clip_bytes, err = heygen_tool._render_avatar_clip_v3_greenscreen(
         "script text", "avatar-id", "voice-id", "avatar_iii", "#00FF00",
-        supports_motion_prompt=False, fit="contain",
+        supports_motion_prompt=False, supports_remove_background=False, fit="contain",
         motion_prompt="unused", title="Title",
     )
 
@@ -304,6 +340,9 @@ def test_render_avatar_clip_v3_greenscreen_omits_motion_prompt_when_unsupported(
     assert "motion_prompt" not in captured_payload
     assert captured_payload["fit"] == "contain"
     assert captured_payload["engine"] == {"type": "avatar_iii"}
+    # avatar_iii/studio_avatar: HeyGen rejects remove_background outright (HTTP
+    # 400 "not trained for matting", confirmed live 2026-07-27) — must be omitted.
+    assert "remove_background" not in captured_payload
 
 
 def test_render_avatar_clip_v3_greenscreen_includes_motion_prompt_when_supported(monkeypatch):
@@ -325,13 +364,82 @@ def test_render_avatar_clip_v3_greenscreen_includes_motion_prompt_when_supported
 
     clip_bytes, err = heygen_tool._render_avatar_clip_v3_greenscreen(
         "script text", "avatar-id", "voice-id", "avatar_v", "#00FF00",
-        supports_motion_prompt=True, fit=None,
+        supports_motion_prompt=True, supports_remove_background=True, fit=None,
         motion_prompt="Professional broadcast news anchor.", title="Title",
     )
 
     assert err is None
     assert captured_payload["motion_prompt"] == "Professional broadcast news anchor."
     assert "fit" not in captured_payload
+    assert captured_payload["remove_background"] is True
+
+
+def test_render_avatar_clip_v3_greenscreen_sets_remove_background_when_supported(monkeypatch):
+    """
+    Regression guard: HeyGen has been observed to silently ignore an explicit
+    `background` color and fall back to a default backdrop unless
+    `remove_background: true` is also set (confirmed live 2026-07-27, Zayne
+    Carter/avatar_iv — the color-only payload rendered an unrelated stock
+    outdoor scene instead of green). Must be present for matting-capable avatars.
+    """
+    captured_payload = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured_payload.update(json)
+        return _FakeResp(json_data={"data": {"video_id": "vid123"}})
+
+    def fake_get(url, headers=None, timeout=None):
+        if "v3/videos/" in url:
+            return _FakeResp(json_data={"data": {"status": "completed", "video_url": "https://cdn/x.mp4"}})
+        return _FakeResp()
+
+    monkeypatch.setattr(heygen_tool.requests, "post", fake_post)
+    monkeypatch.setattr(heygen_tool.requests, "get", fake_get)
+    monkeypatch.setattr(heygen_tool.time, "sleep", lambda s: None)
+    monkeypatch.setattr(heygen_tool.settings, "HEYGEN_API_KEY", "fake-key")
+
+    heygen_tool._render_avatar_clip_v3_greenscreen(
+        "script text", "avatar-id", "voice-id", "avatar_iv", "#00FF00",
+        supports_motion_prompt=True, supports_remove_background=True, fit=None,
+        motion_prompt="motion", title="Title",
+    )
+
+    assert captured_payload["remove_background"] is True
+    assert captured_payload["background"] == {"type": "color", "value": "#00FF00"}
+
+
+def test_render_avatar_clip_v3_greenscreen_omits_remove_background_when_unsupported(monkeypatch):
+    """
+    Regression guard for the opposite case: avatar_iii/studio_avatar avatars
+    reject remove_background outright with HTTP 400 ("This video avatar does
+    not support background removal. The avatar must be trained for matting")
+    — confirmed live 2026-07-27, Shawn Green and Brandon Jones. Must be
+    omitted entirely for these, not sent as False.
+    """
+    captured_payload = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured_payload.update(json)
+        return _FakeResp(json_data={"data": {"video_id": "vid123"}})
+
+    def fake_get(url, headers=None, timeout=None):
+        if "v3/videos/" in url:
+            return _FakeResp(json_data={"data": {"status": "completed", "video_url": "https://cdn/x.mp4"}})
+        return _FakeResp()
+
+    monkeypatch.setattr(heygen_tool.requests, "post", fake_post)
+    monkeypatch.setattr(heygen_tool.requests, "get", fake_get)
+    monkeypatch.setattr(heygen_tool.time, "sleep", lambda s: None)
+    monkeypatch.setattr(heygen_tool.settings, "HEYGEN_API_KEY", "fake-key")
+
+    heygen_tool._render_avatar_clip_v3_greenscreen(
+        "script text", "avatar-id", "voice-id", "avatar_iii", "#00FF00",
+        supports_motion_prompt=False, supports_remove_background=False, fit="contain",
+        motion_prompt="motion", title="Title",
+    )
+
+    assert "remove_background" not in captured_payload
+    assert captured_payload["background"] == {"type": "color", "value": "#00FF00"}
 
 
 def test_render_avatar_clip_v3_greenscreen_returns_error_on_failed_status(monkeypatch):
@@ -348,7 +456,7 @@ def test_render_avatar_clip_v3_greenscreen_returns_error_on_failed_status(monkey
 
     clip_bytes, err = heygen_tool._render_avatar_clip_v3_greenscreen(
         "script", "avatar-id", "voice-id", "avatar_v", "#00FF00",
-        True, None, "motion", "Title",
+        True, True, None, "motion", "Title",
     )
     assert clip_bytes is None
     assert "render blew up" in err
