@@ -59,6 +59,16 @@ def test_route_done_on_anchor_failed(ep):
     assert ep._route_after_step(state) == "done"
 
 
+def test_route_done_on_needs_human_review_set_generically(ep):
+    """needs_human_review must halt routing regardless of which step set it — not
+    just the two hardcoded fact_check/compliance branches below. This is what makes
+    the video_editor hard-failure gate (agents/video_editor/agent.py, set from
+    _execute_step_node) actually stop the pipeline instead of continuing on to
+    compliance_checker/producer/publisher with no video."""
+    state = _base_state(current_step_index=1, needs_human_review=True)
+    assert ep._route_after_step(state) == "done"
+
+
 def test_fact_check_retry_splices_reverification(ep):
     """After editor patches a HOLD_FOR_CORRECTIONS article, with retries remaining,
     the EP should splice ['fact_checker', 'editor'] back into the step list rather
@@ -216,6 +226,39 @@ async def test_execute_step_captures_compliance_verdict(ep, monkeypatch):
 
     assert result["compliance_verdict"] == "HOLD FOR REVIEW"
     assert result["last_step_name"] == "compliance_checker"
+
+
+async def test_execute_step_halts_on_video_editor_failure(ep, monkeypatch):
+    """Regression guard for the 2026-07-28 incident: a video_editor step that
+    couldn't deterministically resolve a real video for this run must halt the
+    pipeline (needs_human_review) rather than let compliance/producer/publisher
+    continue with no video, or worse, a stale one from an unrelated prior run."""
+    import agents.executive_producer.agent as ep_module
+
+    async def fake_get_agent(name):
+        assert name == "video_editor"
+        return _FakeAgent({
+            "success": False,
+            "response": "VIDEO EDITOR FAILED: no video_url found in the anchor's output.",
+            "agent": "video_editor",
+        })
+
+    monkeypatch.setattr(ep_module.agent_registry, "get_agent", fake_get_agent)
+
+    state = _base_state(
+        steps=["video_editor"],
+        current_step_index=0,
+        request="test request",
+        topic="test topic",
+        outputs={},
+    )
+    result = await ep._execute_step_node(state)
+
+    assert result["needs_human_review"] is True
+    assert result["review_stage"] == "video_editor"
+    assert "VIDEO EDITOR FAILED" in result["human_review_reason"]
+    # And the routing that reads this state must actually stop, not just record it.
+    assert ep._route_after_step(result) == "done"
 
 
 async def _run_process_message_with_fake_final_state(ep, state_overrides, monkeypatch):

@@ -159,18 +159,34 @@ class _FakeExecutor:
         return {"output": self._output_text}
 
 
+_ANCHOR_OUTPUT_MESSAGE = (
+    "DESK_SLUG: national\nTOPIC: Test topic\n\n"
+    "=== ANCHOR OUTPUT ===\n"
+    "Anchor video generation complete.\n"
+    "video_id: abc123\n"
+    "video_url: https://files2.heygen.ai/example/abc123.mp4\n"
+    "thumbnail_url: \n"
+    "scenes: 1\n\n"
+    "MEDIA_DIR: {media_dir}"
+)
+
+
 def _setup_pkg(tmp_path, monkeypatch):
-    """Point settings.MEDIA_DIR at tmp_path and write a minimal video_package.json
-    referencing a real (dummy) video file, so the post-processing block in
-    process_message runs against real files instead of failing existence checks.
-    assemble_final_video is stubbed out — it isn't Phase 7.3's concern here, and
-    depends on ambient ./assets/promo|outro files this test shouldn't rely on."""
+    """Point settings.MEDIA_DIR at tmp_path, stub the deterministic download to write a
+    real (dummy) video file there instead of making a network call, and stub
+    assemble_final_video (depends on ambient ./assets/promo|outro files this test
+    shouldn't rely on — not Phase 7.3's concern here)."""
     monkeypatch.setattr(video_editor_module.settings, "MEDIA_DIR", str(tmp_path))
     monkeypatch.setattr(video_editor_module, "assemble_final_video", lambda path: None)
+
     video_path = tmp_path / "anchor_video.mp4"
-    video_path.write_bytes(b"fake-mp4-bytes")
+
+    def fake_download(url, filename=None, directory=None):
+        video_path.write_bytes(b"fake-mp4-bytes")
+        return str(video_path)
+
+    monkeypatch.setattr(video_editor_module, "_download_video_impl", fake_download)
     pkg_path = tmp_path / "video_package.json"
-    pkg_path.write_text(json.dumps({"video_file": str(video_path)}), encoding="utf-8")
     return pkg_path, video_path
 
 
@@ -185,7 +201,7 @@ async def test_video_editor_flagged_qa_writes_to_review_queue(tmp_path, monkeypa
         lambda path, **kw: {"flagged": True, "notes": "Visible watermark in bottom-right corner."},
     )
 
-    result = await agent.process_message("DESK_SLUG: national\nTOPIC: Test topic\nMEDIA_DIR: " + str(tmp_path))
+    result = await agent.process_message(_ANCHOR_OUTPUT_MESSAGE.format(media_dir=tmp_path))
 
     assert result["success"] is True
     pending = review_queue.list_pending()
@@ -195,6 +211,7 @@ async def test_video_editor_flagged_qa_writes_to_review_queue(tmp_path, monkeypa
 
     pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
     assert pkg["visual_qa"]["flagged"] is True
+    assert pkg["video_url"] == "https://files2.heygen.ai/example/abc123.mp4"
 
 
 async def test_video_editor_clean_qa_does_not_write_to_review_queue(tmp_path, monkeypatch):
@@ -208,7 +225,57 @@ async def test_video_editor_clean_qa_does_not_write_to_review_queue(tmp_path, mo
         lambda path, **kw: {"flagged": False, "notes": "Frames look clean."},
     )
 
-    result = await agent.process_message("DESK_SLUG: national\nTOPIC: Test topic\nMEDIA_DIR: " + str(tmp_path))
+    result = await agent.process_message(_ANCHOR_OUTPUT_MESSAGE.format(media_dir=tmp_path))
 
     assert result["success"] is True
     assert review_queue.list_pending() == []
+
+
+async def test_video_editor_fails_hard_when_no_video_url_in_anchor_output(tmp_path, monkeypatch):
+    """Regression guard for the 2026-07-28 incident: no video_url in the anchor's
+    output must be a hard, clearly-labeled failure — never a silent fall-through to
+    whatever video_package.json happens to already exist on disk."""
+    monkeypatch.setattr(video_editor_module.settings, "MEDIA_DIR", str(tmp_path))
+    stale_pkg = tmp_path / "video_package.json"
+    stale_pkg.write_text(json.dumps({
+        "video_file": str(tmp_path / "old_unrelated_video.mp4"),
+        "video_url": "https://files2.heygen.ai/example/some-other-story.mp4",
+        "title": "An unrelated earlier story",
+    }), encoding="utf-8")
+    (tmp_path / "old_unrelated_video.mp4").write_bytes(b"stale-video-bytes")
+
+    agent = video_editor_module.Agent()
+    agent.executor = _FakeExecutor("Video package built.")
+
+    result = await agent.process_message("DESK_SLUG: national\nTOPIC: Test topic\n\n=== ANCHOR OUTPUT ===\nAnchor step failed.\n")
+
+    assert result["success"] is False
+    assert "VIDEO EDITOR FAILED" in result["response"]
+    assert "no video_url" in result["response"].lower()
+    # The stale package must be left untouched — not overwritten, not reused.
+    assert json.loads(stale_pkg.read_text(encoding="utf-8"))["title"] == "An unrelated earlier story"
+
+
+async def test_video_editor_discards_stale_metadata_when_video_url_differs(tmp_path, monkeypatch):
+    """If an existing video_package.json references a different video_url than this
+    run's anchor output, its title/description/tags must be discarded as stale, not
+    carried into the new package."""
+    pkg_path, video_path = _setup_pkg(tmp_path, monkeypatch)
+    pkg_path.write_text(json.dumps({
+        "video_file": str(tmp_path / "old.mp4"),
+        "video_url": "https://files2.heygen.ai/example/completely-different-story.mp4",
+        "title": "A totally different, unrelated story",
+        "tags": ["unrelated"],
+    }), encoding="utf-8")
+
+    agent = video_editor_module.Agent()
+    agent.executor = _FakeExecutor("Video package built.")
+    monkeypatch.setattr(video_editor_module, "check_visual_qa", lambda path, **kw: {"flagged": False, "notes": ""})
+
+    result = await agent.process_message(_ANCHOR_OUTPUT_MESSAGE.format(media_dir=tmp_path))
+
+    assert result["success"] is True
+    pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
+    assert pkg["video_url"] == "https://files2.heygen.ai/example/abc123.mp4"
+    assert pkg["title"] != "A totally different, unrelated story"
+    assert pkg["tags"] != ["unrelated"]

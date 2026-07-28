@@ -16,7 +16,7 @@ from agents.video_editor.prompts import VIDEO_EDITOR_PROMPT
 from tools.video_tools import (
     download_video, extract_graphic_cues, save_video_package, assemble_final_video,
     compose_foreground_layers, extract_graphic_cues_with_position, render_graphic_overlays,
-    check_visual_qa,
+    check_visual_qa, _download_video_impl,
 )
 from tools.file_operations_tool import file_operations_tool
 from config.settings import settings
@@ -53,89 +53,170 @@ class Agent(BaseAgent):
 
     async def process_message(self, message: str, context: dict = None) -> dict:
         try:
-            result = self.executor.invoke({"input": message, "chat_history": []})
-            response_text = result.get("output", "")
+            # Deterministic extraction of the ANCHOR OUTPUT block, done in plain Python
+            # BEFORE trusting the LLM tool-calling agent at all. This is the fix for a
+            # real incident (2026-07-28): the LLM occasionally fails to notice a
+            # video_url that IS present in its own context and reports it missing —
+            # and the old code then silently fell back to whatever video_package.json
+            # happened to already exist at the global settings.MEDIA_DIR path (from a
+            # PREVIOUS, unrelated production), reprocessed that stale video, and
+            # Publisher republished it under the wrong title. Never again: the video
+            # this step operates on is always the one we deterministically download
+            # ourselves, never inferred from ambient on-disk state.
+            anchor_block_match = re.search(
+                r'=== ANCHOR OUTPUT ===\s*(.*?)(?=\n\n===|\Z)', message, re.DOTALL | re.IGNORECASE,
+            )
+            anchor_block = anchor_block_match.group(1) if anchor_block_match else ""
+            video_url_match = re.search(r'video_url:\s*(\S+)', anchor_block, re.IGNORECASE)
+            thumb_match = re.search(r'thumbnail_url:\s*(\S*)', anchor_block, re.IGNORECASE)
+            video_url = video_url_match.group(1).strip() if video_url_match else ""
+            thumbnail_url = thumb_match.group(1).strip() if thumb_match else ""
+
+            if not video_url:
+                logger.error(
+                    "[video_editor] No video_url found in ANCHOR OUTPUT — cannot proceed. "
+                    "This halts the pipeline rather than falling back to any pre-existing "
+                    "video_package.json, which could belong to an unrelated prior run."
+                )
+                return {
+                    "success": False,
+                    "response": (
+                        "VIDEO EDITOR FAILED: no video_url found in the anchor's output. "
+                        "The anchor step must be re-run — refusing to fall back to any "
+                        "existing video_package.json, since it may belong to a different story."
+                    ),
+                    "agent": "video_editor",
+                }
+
+            # Deterministically download the correct video for THIS run, with a fresh
+            # timestamped filename — regardless of what the LLM tool-calling step below
+            # does or doesn't manage to do.
+            downloaded_path_str = _download_video_impl(video_url)
+            if downloaded_path_str.startswith("Error"):
+                logger.error(f"[video_editor] Deterministic download failed: {downloaded_path_str}")
+                return {
+                    "success": False,
+                    "response": f"VIDEO EDITOR FAILED: could not download the anchor video — {downloaded_path_str}",
+                    "agent": "video_editor",
+                }
+            broadcast_path = Path(downloaded_path_str)
+
+            topic_m = re.search(r'TOPIC[:\s]+([^\n]+)', message, re.IGNORECASE)
+            topic = topic_m.group(1).strip() if topic_m else ""
+
+            # Run the LLM tool-calling agent for the parts that genuinely benefit from
+            # its judgment (suggested title/description/tags, graphic cue extraction) —
+            # its output is used for metadata only now, never to decide which video file
+            # is correct.
+            try:
+                result = self.executor.invoke({"input": message, "chat_history": []})
+                response_text = result.get("output", "")
+            except Exception as e:
+                logger.warning(f"[video_editor] LLM tool-calling step failed (continuing with deterministic fallbacks): {e}")
+                response_text = f"[LLM step failed: {e}]"
 
             pkg_path = Path(settings.MEDIA_DIR) / "video_package.json"
+            pkg: dict = {}
             if pkg_path.exists():
                 try:
-                    pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
-                    broadcast_path = Path(pkg.get("video_file", ""))
-
-                    if broadcast_path.exists():
-                        # Step 0: Burn [GRAPHIC:] cues into the video as lower-third overlays.
-                        # Extracted directly from the script text in this message (not from the
-                        # LLM's own tool call above) so rendering doesn't depend on the LLM
-                        # having faithfully preserved cue text/order when building the package.
-                        script_match = re.search(
-                            r'=== SCRIPT ===\s*(.*?)(?=\n\nDESK_SLUG:|\n\nMEDIA_DIR:|===|\Z)',
-                            message, re.DOTALL | re.IGNORECASE,
+                    candidate = json.loads(pkg_path.read_text(encoding="utf-8"))
+                    # Staleness check: only trust the LLM's title/description/tags if the
+                    # package it wrote actually references the video we just downloaded
+                    # for THIS run — otherwise it's leftover from a different production.
+                    if candidate.get("video_url") == video_url:
+                        pkg = candidate
+                    else:
+                        logger.warning(
+                            "[video_editor] Existing video_package.json references a different "
+                            "video_url than this run's anchor output — discarding its metadata "
+                            "as stale rather than trusting it."
                         )
-                        if script_match:
-                            cues = extract_graphic_cues_with_position(script_match.group(1))
-                            if cues:
-                                gfx_path = render_graphic_overlays(broadcast_path, cues)
-                                if gfx_path:
-                                    broadcast_path = gfx_path
-                                    pkg["video_file"] = str(gfx_path)
-                                    pkg["graphic_overlays_applied"] = len(cues)
-                                    logger.info(f"[video_editor] Graphic overlays applied → {gfx_path.name}")
-                                    response_text += f"\nGraphic overlays applied ({len(cues)}) → {gfx_path.name}"
-
-                        # Step 1: Apply foreground layers (in front of avatar) if any
-                        desk_slug = ""
-                        m = re.search(r'DESK_SLUG[:\s]+([^\n]+)', message, re.IGNORECASE)
-                        if m:
-                            desk_slug = m.group(1).strip()
-
-                        fg_layers = get_foreground_layers(desk_slug)
-                        if fg_layers:
-                            fg_path = compose_foreground_layers(broadcast_path, fg_layers)
-                            if fg_path:
-                                broadcast_path = fg_path
-                                pkg["video_file"] = str(fg_path)
-                                pkg["foreground_layers_applied"] = True
-                                logger.info(f"[video_editor] Foreground layers applied → {fg_path.name}")
-                                response_text += f"\nForeground layers applied → {fg_path.name}"
-
-                        # Step 2: Assemble with promo/outro
-                        final_path = assemble_final_video(broadcast_path)
-                        if final_path:
-                            pkg["video_file"] = str(final_path)
-                            pkg["promo_prepended"] = True
-                            logger.info(f"[video_editor] video_package.json updated → {final_path.name}")
-                            response_text += f"\nFinal video assembled → {final_path.name}"
-                            broadcast_path = final_path
-
-                        # Step 3: Visual QA (Phase 7.3, SELF_IMPROVEMENT_ROADMAP.md) — sample
-                        # frames from the final composited video and ask a vision LLM whether
-                        # anything looks wrong (watermark, chromakey fringe, mismatched
-                        # background). Never blocks publish — flags go to the human review
-                        # queue, same pattern as a fact-check/compliance hold.
-                        try:
-                            qa_result = check_visual_qa(broadcast_path)
-                            pkg["visual_qa"] = qa_result
-                            if qa_result.get("flagged"):
-                                topic_m = re.search(r'TOPIC[:\s]+([^\n]+)', message, re.IGNORECASE)
-                                topic = topic_m.group(1).strip() if topic_m else ""
-                                from tools.review_queue import record as _review_record
-                                _review_record(
-                                    topic=topic,
-                                    reason=f"Visual QA flag: {qa_result.get('notes', '')}",
-                                    stage="visual_qa",
-                                    output_dir=str(Path(settings.MEDIA_DIR).parent),
-                                    workflow="",
-                                )
-                                logger.warning(f"[video_editor] Visual QA flagged: {qa_result.get('notes', '')[:200]}")
-                                response_text += f"\nVisual QA flagged for review: {qa_result.get('notes', '')[:200]}"
-                            else:
-                                logger.info(f"[video_editor] Visual QA clean: {qa_result.get('notes', '')[:120]}")
-                        except Exception as e:
-                            logger.warning(f"[video_editor] Visual QA check failed: {e}")
-
-                        pkg_path.write_text(json.dumps(pkg, indent=2), encoding="utf-8")
                 except Exception as e:
-                    logger.warning(f"[video_editor] Post-processing failed: {e}")
+                    logger.warning(f"[video_editor] Could not read existing video_package.json: {e}")
+
+            pkg.setdefault("topic", topic)
+            pkg.setdefault("title", topic or "News Segment")
+            pkg.setdefault("description", topic or "")
+            pkg.setdefault("tags", [])
+            pkg.setdefault("graphic_cues", [])
+            # Always authoritative, regardless of the LLM's own tool call above.
+            pkg["video_file"] = str(broadcast_path)
+            pkg["video_url"] = video_url
+            pkg["thumbnail_url"] = thumbnail_url
+
+            try:
+                # Step 0: Burn [GRAPHIC:] cues into the video as lower-third overlays.
+                # Extracted directly from the script text in this message (not from the
+                # LLM's own tool call above) so rendering doesn't depend on the LLM
+                # having faithfully preserved cue text/order when building the package.
+                script_match = re.search(
+                    r'=== SCRIPT ===\s*(.*?)(?=\n\nDESK_SLUG:|\n\nMEDIA_DIR:|===|\Z)',
+                    message, re.DOTALL | re.IGNORECASE,
+                )
+                if script_match:
+                    cues = extract_graphic_cues_with_position(script_match.group(1))
+                    if cues:
+                        gfx_path = render_graphic_overlays(broadcast_path, cues)
+                        if gfx_path:
+                            broadcast_path = gfx_path
+                            pkg["video_file"] = str(gfx_path)
+                            pkg["graphic_overlays_applied"] = len(cues)
+                            logger.info(f"[video_editor] Graphic overlays applied → {gfx_path.name}")
+                            response_text += f"\nGraphic overlays applied ({len(cues)}) → {gfx_path.name}"
+
+                # Step 1: Apply foreground layers (in front of avatar) if any
+                desk_slug = ""
+                m = re.search(r'DESK_SLUG[:\s]+([^\n]+)', message, re.IGNORECASE)
+                if m:
+                    desk_slug = m.group(1).strip()
+
+                fg_layers = get_foreground_layers(desk_slug)
+                if fg_layers:
+                    fg_path = compose_foreground_layers(broadcast_path, fg_layers)
+                    if fg_path:
+                        broadcast_path = fg_path
+                        pkg["video_file"] = str(fg_path)
+                        pkg["foreground_layers_applied"] = True
+                        logger.info(f"[video_editor] Foreground layers applied → {fg_path.name}")
+                        response_text += f"\nForeground layers applied → {fg_path.name}"
+
+                # Step 2: Assemble with promo/outro
+                final_path = assemble_final_video(broadcast_path)
+                if final_path:
+                    pkg["video_file"] = str(final_path)
+                    pkg["promo_prepended"] = True
+                    logger.info(f"[video_editor] video_package.json updated → {final_path.name}")
+                    response_text += f"\nFinal video assembled → {final_path.name}"
+                    broadcast_path = final_path
+
+                # Step 3: Visual QA (Phase 7.3, SELF_IMPROVEMENT_ROADMAP.md) — sample
+                # frames from the final composited video and ask a vision LLM whether
+                # anything looks wrong (watermark, chromakey fringe, mismatched
+                # background). Never blocks publish — flags go to the human review
+                # queue, same pattern as a fact-check/compliance hold.
+                try:
+                    qa_result = check_visual_qa(broadcast_path)
+                    pkg["visual_qa"] = qa_result
+                    if qa_result.get("flagged"):
+                        from tools.review_queue import record as _review_record
+                        _review_record(
+                            topic=topic,
+                            reason=f"Visual QA flag: {qa_result.get('notes', '')}",
+                            stage="visual_qa",
+                            output_dir=str(Path(settings.MEDIA_DIR).parent),
+                            workflow="",
+                        )
+                        logger.warning(f"[video_editor] Visual QA flagged: {qa_result.get('notes', '')[:200]}")
+                        response_text += f"\nVisual QA flagged for review: {qa_result.get('notes', '')[:200]}"
+                    else:
+                        logger.info(f"[video_editor] Visual QA clean: {qa_result.get('notes', '')[:120]}")
+                except Exception as e:
+                    logger.warning(f"[video_editor] Visual QA check failed: {e}")
+
+                pkg_path.parent.mkdir(parents=True, exist_ok=True)
+                pkg_path.write_text(json.dumps(pkg, indent=2), encoding="utf-8")
+            except Exception as e:
+                logger.warning(f"[video_editor] Post-processing failed: {e}")
 
             return {"success": True, "response": response_text, "agent": "video_editor"}
         except Exception as e:

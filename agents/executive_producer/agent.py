@@ -687,6 +687,18 @@ class Agent(BaseAgent):
                         state["anchor_failed"] = True
                         state["error"] = "Anchor step failed to produce a video_id. Pipeline stopped."
 
+            # If video_editor couldn't deterministically resolve a real video for this run
+            # (see agents/video_editor/agent.py — added after a 2026-07-28 incident where a
+            # stale video_package.json from an unrelated prior production got silently
+            # republished), halt before compliance/producer/publisher rather than let a
+            # possibly-wrong or missing video continue through. Routed through the same
+            # needs_human_review/review_queue mechanism as a fact-check/compliance hold.
+            if agent_name == "video_editor" and anchor_output.startswith("VIDEO EDITOR FAILED"):
+                logger.warning(f"[EP] Video Editor failed — halting pipeline: {anchor_output[:200]}")
+                state["needs_human_review"] = True
+                state["review_stage"] = "video_editor"
+                state["human_review_reason"] = anchor_output
+
         except Exception as e:
             logger.error(f"[EP] Step '{agent_name}' failed: {e}", exc_info=True)
             outputs = dict(state.get("outputs", {}))
@@ -747,7 +759,7 @@ class Agent(BaseAgent):
 
         if idx >= len(state["steps"]):
             return "done"
-        if state.get("researcher_failed") or state.get("anchor_failed"):
+        if state.get("researcher_failed") or state.get("anchor_failed") or state.get("needs_human_review"):
             return "done"
         return "next_step"
 

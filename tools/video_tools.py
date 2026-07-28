@@ -426,23 +426,15 @@ def compose_foreground_layers(video_path: Path, layers: list) -> Path | None:
         return None
 
 
-@tool
-def download_video(
+def _download_video_impl(
     url: str,
     filename: Optional[str] = None,
     directory: Optional[str] = None,
 ) -> str:
-    """
-    Download a video file from a URL and save it to disk.
-
-    Args:
-        url: The video URL to download
-        filename: Output filename (auto-generated if not provided)
-        directory: Save directory (defaults to ./output/media)
-
-    Returns:
-        Path to the saved file, or error message
-    """
+    """Plain-Python core of download_video (not an LLM tool) — called directly by
+    agents/video_editor/agent.py's deterministic extraction path as well as by the
+    @tool-wrapped version below, so a fresh video always gets downloaded whether or
+    not the LLM tool-calling agent successfully invokes the tool itself."""
     save_dir = directory or settings.MEDIA_DIR
     Path(save_dir).mkdir(parents=True, exist_ok=True)
 
@@ -469,6 +461,26 @@ def download_video(
     except Exception as e:
         logger.error(f"[download_video] Error: {e}", exc_info=True)
         return f"Error downloading video: {str(e)}"
+
+
+@tool
+def download_video(
+    url: str,
+    filename: Optional[str] = None,
+    directory: Optional[str] = None,
+) -> str:
+    """
+    Download a video file from a URL and save it to disk.
+
+    Args:
+        url: The video URL to download
+        filename: Output filename (auto-generated if not provided)
+        directory: Save directory (defaults to ./output/media)
+
+    Returns:
+        Path to the saved file, or error message
+    """
+    return _download_video_impl(url, filename, directory)
 
 
 @tool
