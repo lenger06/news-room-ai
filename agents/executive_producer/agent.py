@@ -909,6 +909,8 @@ class Agent(BaseAgent):
     # ------------------------------------------------------------------ #
 
     async def process_message(self, message: str, context: dict = None) -> dict:
+        import time
+        _start_ts = time.time()
         logger.info(f"[EP] Received request: {message[:120]}")
         try:
             initial_state: ProductionState = {
@@ -966,6 +968,34 @@ class Agent(BaseAgent):
                 or final_state.get("anchor_failed")
                 or final_state.get("needs_human_review")
             )
+
+            # Phase 7.1 (SELF_IMPROVEMENT_ROADMAP.md) — record a structured outcome for
+            # every run that actually reached the graph, dedup-suppressed runs included
+            # (they're a real, meaningful outcome: nothing new was produced on purpose).
+            # Never let this break the actual response — it's diagnostics, not the product.
+            try:
+                from tools.agent_outcomes import record as _outcome_record
+                _published = "Published to YouTube successfully" in (
+                    final_state.get("outputs", {}).get("publisher", "")
+                )
+                _outcome_record(
+                    workflow=final_state.get("workflow", ""),
+                    show_slug=final_state.get("show_slug", ""),
+                    desk=final_state.get("desk", ""),
+                    anchor_name=final_state.get("anchor_name", ""),
+                    topic=final_state.get("topic", ""),
+                    keywords=final_state.get("keywords", []),
+                    fact_check_verdict=final_state.get("fact_check_verdict", ""),
+                    fact_check_attempts=final_state.get("fact_check_attempts", 0),
+                    compliance_verdict=final_state.get("compliance_verdict", ""),
+                    published=_published,
+                    succeeded=succeeded,
+                    duration_seconds=time.time() - _start_ts,
+                    run_id=final_state.get("run_id", ""),
+                )
+            except Exception as e:
+                logger.warning(f"[EP] Could not record outcome: {e}")
+
             return {
                 "success": succeeded,
                 "response": final_state["final_summary"],

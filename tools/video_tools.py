@@ -1,4 +1,6 @@
 from langchain.tools import tool
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
 from typing import Optional
 import logging
 import requests
@@ -130,6 +132,88 @@ def _get_video_duration_seconds(path: Path) -> float | None:
     except Exception as e:
         logger.warning(f"[video_editor] Could not read video duration: {e}")
         return None
+
+
+def check_visual_qa(video_path: Path, num_frames: int = 3) -> dict:
+    """
+    Phase 7.3 (SELF_IMPROVEMENT_ROADMAP.md) — sample frames from the final composited
+    video and ask a vision-capable LLM whether any show a watermark, logo, or visual
+    artifact that shouldn't be there. Deliberately scoped to the defect class already
+    known to occur (the avatar_iii "Veo" watermark — see HEYGEN_V3_MIGRATION_PLAN.md
+    sec 4a/10) rather than open-ended anomaly detection.
+
+    Returns {"flagged": bool, "notes": str}. Never raises — a QA check that crashes the
+    pipeline is worse than one that silently skips, so any failure here returns
+    flagged=False with an explanatory note; callers should treat that as "couldn't
+    check", not "confirmed clean". This never blocks publish on its own — see the
+    caller in agents/video_editor/agent.py for how a flag is surfaced instead.
+    """
+    ffmpeg = _get_ffmpeg()
+    if not ffmpeg:
+        return {"flagged": False, "notes": "FFmpeg not available — visual QA skipped"}
+
+    duration = _get_video_duration_seconds(video_path)
+    if not duration or duration <= 0:
+        return {"flagged": False, "notes": "Could not determine video duration — visual QA skipped"}
+
+    # Evenly spaced samples, avoiding the very first/last instant (fade-in/out).
+    timestamps = [duration * (i + 1) / (num_frames + 1) for i in range(num_frames)]
+
+    import base64
+    images_b64 = []
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for i, ts in enumerate(timestamps):
+                frame_path = Path(tmpdir) / f"frame_{i}.jpg"
+                subprocess.run(
+                    [ffmpeg, "-y", "-ss", str(ts), "-i", str(video_path),
+                     "-frames:v", "1", "-q:v", "3", str(frame_path)],
+                    capture_output=True, timeout=30,
+                )
+                if frame_path.exists():
+                    images_b64.append(base64.b64encode(frame_path.read_bytes()).decode("ascii"))
+    except Exception as e:
+        logger.warning(f"[video_qa] Frame extraction failed: {e}")
+        return {"flagged": False, "notes": f"Frame extraction failed: {e}"}
+
+    if not images_b64:
+        return {"flagged": False, "notes": "No frames extracted — visual QA skipped"}
+
+    try:
+        llm = ChatOpenAI(
+            model=settings.model_for("video_editor"), temperature=0.0,
+            openai_api_key=settings.OPENAI_API_KEY,
+        )
+        content: list = [{
+            "type": "text",
+            "text": (
+                "These are frames sampled from a finished broadcast news video, ready to "
+                "publish. Look carefully at each frame, especially the corners and edges. "
+                "Does any frame show a watermark, logo, or visual artifact that should not "
+                "be in a professional news broadcast — e.g. a third-party AI-tool watermark, "
+                "a visible chromakey fringe/halo around the anchor, or an obviously wrong or "
+                "mismatched background? Respond with exactly one line starting with "
+                "'FLAGGED: yes' or 'FLAGGED: no', followed by a one-sentence explanation."
+            ),
+        }]
+        for b64 in images_b64:
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+
+        response = llm.invoke([HumanMessage(content=content)])
+        text = (response.content or "").strip()
+        upper = text.upper()
+        if "FLAGGED: YES" in upper:
+            flagged = True
+        elif "FLAGGED: NO" in upper:
+            flagged = False
+        else:
+            # Model didn't follow the expected format — err toward a human glancing at
+            # it rather than silently assuming clean.
+            flagged = True
+        return {"flagged": flagged, "notes": text}
+    except Exception as e:
+        logger.warning(f"[video_qa] Vision check failed: {e}")
+        return {"flagged": False, "notes": f"Vision check failed: {e}"}
 
 
 _LOWER_THIRD_FONT_CANDIDATES = [

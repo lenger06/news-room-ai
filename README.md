@@ -336,10 +336,23 @@ The Breaking News Checker also uses this queue as a safety net around `/produce/
 - `breaking_news_submission` — the call to start the job itself failed even after one retry (the endpoint just spawns a background task and returns immediately, so a slow/failed response means something was actually wrong, not that production is slow). The story is also un-recorded from the breaking-news dedup log so it isn't left falsely marked "covered" when nothing was produced.
 - `breaking_news_job_error` — the job started but the pipeline itself errored out downstream; also un-recorded, since it's confirmed nothing was published.
 - `breaking_news_job_stalled` — a bounded background check (~45 minutes after firing, comfortably past the slowest production observed) finds the job still running; flagged for review but *not* un-recorded, since it might still finish normally and a duplicate fire would be worse than a late one.
+- `visual_qa` — the Video Editor's automated visual QA check (see below) flagged a frame in the final video; never blocks publish on its own, just adds an entry here for a human to look at.
 
 A halted run is also reported back as `"success": false` from the Executive Producer, and `/produce/async` marks the job `status: "error"` accordingly — so a caller (Jarvis) polling `/job/{job_id}` can tell a halt apart from a normal completion, rather than seeing a silent "complete" with no video.
 
 There's no UI for this yet — check the file directly, or call `tools.review_queue.list_pending()`.
+
+---
+
+## Outcome Tracking & Visual QA (Self-Improvement Phase 7.1/7.3)
+
+Every `process_message()` call on the Executive Producer records a structured outcome to `./output/agent_outcomes.json` (`tools/agent_outcomes.py`) — workflow, show, desk, anchor, topic, fact-check verdict and attempt count, compliance verdict, whether it published, and wall-clock duration. This is diagnostic data, not a live feedback loop — nothing reads it automatically or changes behavior from it. Recording failures are caught and logged, never allowed to break the actual production response.
+
+Run `python tools/outcome_report.py [days]` (default 7) to get a human-readable summary: overall succeed/publish/fact-check-hold/compliance-hold rates, plus the same broken down by desk, anchor, and workflow. Not scheduled, not autonomous — run it when you want a picture of how the newsroom's been doing.
+
+The Video Editor also runs an automated visual QA pass on the final composited video before it reaches Compliance/Publisher (`tools/video_tools.py:check_visual_qa`) — samples a few frames and asks a vision-capable LLM whether anything looks wrong (a watermark, a chromakey fringe, a mismatched background — the concrete defect classes already known to occur, not open-ended anomaly detection). A flag never blocks publish; it's logged to the human review queue (`stage="visual_qa"`, see above) and saved into `video_package.json` either way.
+
+See `SELF_IMPROVEMENT_ROADMAP.md` Phase 7 for the full design, including why this stops well short of any agent autonomously editing prompts based on this data — that's a deliberately separate, human-approved step (Phase 7.4, not built yet).
 
 ---
 

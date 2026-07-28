@@ -16,6 +16,7 @@ from agents.video_editor.prompts import VIDEO_EDITOR_PROMPT
 from tools.video_tools import (
     download_video, extract_graphic_cues, save_video_package, assemble_final_video,
     compose_foreground_layers, extract_graphic_cues_with_position, render_graphic_overlays,
+    check_visual_qa,
 )
 from tools.file_operations_tool import file_operations_tool
 from config.settings import settings
@@ -104,6 +105,33 @@ class Agent(BaseAgent):
                             pkg["promo_prepended"] = True
                             logger.info(f"[video_editor] video_package.json updated → {final_path.name}")
                             response_text += f"\nFinal video assembled → {final_path.name}"
+                            broadcast_path = final_path
+
+                        # Step 3: Visual QA (Phase 7.3, SELF_IMPROVEMENT_ROADMAP.md) — sample
+                        # frames from the final composited video and ask a vision LLM whether
+                        # anything looks wrong (watermark, chromakey fringe, mismatched
+                        # background). Never blocks publish — flags go to the human review
+                        # queue, same pattern as a fact-check/compliance hold.
+                        try:
+                            qa_result = check_visual_qa(broadcast_path)
+                            pkg["visual_qa"] = qa_result
+                            if qa_result.get("flagged"):
+                                topic_m = re.search(r'TOPIC[:\s]+([^\n]+)', message, re.IGNORECASE)
+                                topic = topic_m.group(1).strip() if topic_m else ""
+                                from tools.review_queue import record as _review_record
+                                _review_record(
+                                    topic=topic,
+                                    reason=f"Visual QA flag: {qa_result.get('notes', '')}",
+                                    stage="visual_qa",
+                                    output_dir=str(Path(settings.MEDIA_DIR).parent),
+                                    workflow="",
+                                )
+                                logger.warning(f"[video_editor] Visual QA flagged: {qa_result.get('notes', '')[:200]}")
+                                response_text += f"\nVisual QA flagged for review: {qa_result.get('notes', '')[:200]}"
+                            else:
+                                logger.info(f"[video_editor] Visual QA clean: {qa_result.get('notes', '')[:120]}")
+                        except Exception as e:
+                            logger.warning(f"[video_editor] Visual QA check failed: {e}")
 
                         pkg_path.write_text(json.dumps(pkg, indent=2), encoding="utf-8")
                 except Exception as e:

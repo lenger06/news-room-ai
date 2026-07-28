@@ -218,11 +218,156 @@ Still true regardless of source:
 
 ---
 
+## Phase 7 — Outcome-driven, human-approved tuning ("Tier 2" self-improvement) — 7.1/7.3 DONE (2026-07-28), 7.2/7.4 not started
+
+Written 2026-07-27 after a discussion about what "self-improving" should and
+shouldn't mean for this system. The short version: real agentic-AI incidents
+labeled "self-improvement" in press coverage (models editing a shutdown
+script rather than complying with it, finding a misconfigured sandbox during
+a CTF eval) are actually **specification gaming** — a system optimizing
+against a measured proxy finds it easier to game the measurement than to
+improve the underlying thing, especially once it's capable enough to edit
+its own evaluator. That risk is not hypothetical for this repo: tonight
+alone produced two real instances of exactly this shape of problem —
+`agents/executive_producer/prompts.py`'s `anchor_override` rule used a real
+anchor name as its example and the LLM echoed it unprompted, and the
+`avatar_iii` engine tier has an intermittent visual defect (a "Veo"
+watermark) that nothing detects automatically. Both are outcome-blindness
+problems: the system has no way to notice its own failures except a human
+reading logs by hand.
+
+**Explicitly out of scope: agents autonomously rewriting their own or each
+other's prompts/code based on a self-computed signal, with no human review.**
+This is the mechanism behind the shutdown-script-editing finding — an
+unsupervised loop reliably finds the proxy's blind spots. Every sub-phase
+below keeps a human in the loop for anything that changes prompts or config.
+`compliance_checker` and `fact_checker` are never eligible to be tuned by
+this loop at all, autonomous or not — if their thresholds seem miscalibrated
+that's a separate, explicit human decision, never something "self-improved"
+into looser.
+
+### 7.1 — Outcome aggregation (foundation for everything else) — DONE (2026-07-28)
+
+The data this needs mostly already exists but is scattered and unaggregated
+— `story_history.json`, `breaking_news_log.json`, `needs_review.json`
+(`tools/review_queue.py`), and per-run fact-check/compliance verdicts, which
+today are only readable by opening individual
+`./output/{show}/{run_id}/production_logs/*.md` files by hand.
+
+- ~~Add a structured per-run outcome record~~ Done: `tools/agent_outcomes.py`
+  (same flat-JSON-log convention as the other `tools/*_log.py` files) —
+  `record()` appends one entry per production, `load_recent(days)` reads a
+  rolling window. `agents/executive_producer/agent.py:process_message()`
+  calls it right after the graph completes (workflow, show, desk, anchor,
+  topic, keywords, fact-check verdict + attempt count, compliance verdict,
+  published — detected by checking the publisher step's output text for
+  "Published to YouTube successfully" — `succeeded`, and wall-clock
+  duration). Wrapped in try/except so a broken outcome-log write can never
+  take down the actual production response.
+- ~~A read-only aggregation script~~ Done: `tools/outcome_report.py`,
+  runnable standalone (`python tools/outcome_report.py [days]`, default 7)
+  or via `generate_report(days)`. Reports overall succeed/publish/hold
+  rates plus the same broken down by desk, anchor, and workflow. Not an
+  agent, not scheduled, not autonomous — run it on request and read the
+  output, same as this roadmap itself.
+- Tests: `tests/test_outcome_tracking.py` — record/load round-trip, window
+  filtering, aggregation math against synthetic data, and the EP wiring
+  (including that a broken `agent_outcomes.record()` call doesn't break
+  `process_message()`).
+- **Real bug caught while building this:** existing tests in
+  `tests/test_ep_self_correction.py` call the real `process_message()` with
+  only `ep.workflow.ainvoke` mocked — once outcome recording was wired in,
+  every test run started writing real entries into the actual project's
+  `./output/agent_outcomes.json`. Fixed by no-op'ing `agent_outcomes.record`
+  in that file's shared test helper. Worth remembering for Phase 7.2/7.4 —
+  any new EP-level side effect needs the same check across existing tests,
+  not just its own new ones.
+
+### 7.2 — Positive-example grounding (extends the existing dossier pattern)
+
+Cheap, low-risk, reuses infrastructure that already exists rather than
+building something new.
+
+- Tag productions in the new outcome log (7.1) that cleared fact-check on
+  the first attempt, cleared compliance, and published successfully as
+  "clean."
+- Alongside the dossier/prior-coverage context the EP already injects into
+  Researcher/Writer step input (Phase 4), optionally surface one clean past
+  example for a similar desk/topic — same keyword-overlap matching
+  convention already used everywhere else in this repo. No new retrieval
+  infrastructure, no embeddings — consistent with Phase 4's existing stance
+  that a vector DB isn't worth it until keyword-overlap demonstrably fails.
+
+### 7.3 — Automated output QA (directly justified by tonight's watermark finding) — DONE (2026-07-28)
+
+The most concretely motivated piece of this phase — this would have caught
+the `avatar_iii` Veo watermark automatically tonight instead of needing a
+manual frame-by-frame review.
+
+- ~~A new check after `video_editor` builds `video_package.json`~~ Done:
+  `tools/video_tools.py:check_visual_qa()` samples frames at evenly-spaced
+  timestamps (default 3, avoiding the very start/end) via FFmpeg, base64-
+  encodes them, and sends them to a vision-capable LLM call (reuses
+  `settings.model_for("video_editor")` — no new per-role model config, no
+  new ML/CV pipeline) asking specifically whether any frame shows a
+  watermark, logo, chromakey fringe, or mismatched background — deliberately
+  not scoped wider than the defect classes already known to occur. Wired
+  into `agents/video_editor/agent.py` as a new step after promo/outro
+  assembly, against the actual final video that will be published.
+  Never raises — any failure (no FFmpeg, no duration, extraction failure,
+  vision-call error) returns `flagged=False` with an explanatory note,
+  treated as "couldn't check," not "confirmed clean." An unparseable vision
+  response (missing the expected `FLAGGED: yes/no` prefix) errs toward
+  flagging rather than silently assuming clean.
+- On a flag: **never auto-blocks publish** — logs to `tools/review_queue.py`
+  with `stage="visual_qa"`, same pattern as an existing fact-check/
+  compliance hold, surfaced for a human to decide. The QA result is also
+  saved into `video_package.json` either way, flagged or not.
+- Tests: `tests/test_video_qa.py` — frame-count/extraction behavior, both
+  flagged and clean vision responses, the unparseable-response fallback,
+  vision-call failure handling, and the `video_editor` wiring (flagged →
+  one review_queue entry with the right stage; clean → none).
+
+### 7.4 — Human-approved prompt tuning loop
+
+The actual "improvement" step — closes the loop from 7.1's data back into
+real prompt changes, deliberately kept out of the autonomous-loop shape.
+
+- Triggered on request ("review the last week's outcome data and suggest
+  prompt tuning"), not on a background schedule. Reads 7.1's aggregated
+  report, identifies the highest-signal issue (e.g. "researcher's
+  fact-check hold rate on health_science stories is 3x the average"), reads
+  the relevant prompt file, and proposes one specific, scoped diff with
+  reasoning — for review, the same way the HeyGen V3 migration plan was
+  written up and approved before any code changed.
+- `compliance_checker`/`fact_checker` prompts are hard-excluded from this
+  loop, per the scope note above.
+- Every change that comes out of this loop, once approved, should be a
+  clearly-tagged commit (e.g. a `[tier2-tuning]` prefix) so the audit trail
+  distinguishes deliberate, reviewed tuning from any other change — a
+  regression should always be traceable to a specific, human-approved diff.
+
+**Build order actually followed:** 7.1 and 7.3 built together 2026-07-28, in
+that order. 7.2 is next in line — cheap, but only worth doing once 7.1 has
+accumulated enough real "clean" runs to have something worth surfacing as a
+positive example. 7.4 should come last, once 7.1 has enough real data to
+make its suggestions worth reviewing rather than guessing from a small
+sample — not started, not scheduled, no code exists for it beyond the
+process description above.
+
+---
+
 ## Status
 
-All phases (0–6) are implemented, tested, and merged as of 2026-07-26. What's
-deliberately still open, not because it was missed but because it needs
-something this repo alone can't provide:
+All phases (0–6) are implemented, tested, and merged as of 2026-07-26.
+Phase 7.1 and 7.3 are implemented, tested, and merged as of 2026-07-28 —
+outcome logging/reporting is live and the visual QA check is wired into
+every `BROADCAST_VIDEO`/`VIDEO_FROM_SCRIPT`/`SPECIAL_REPORT` run. **7.2 and
+7.4 are not started** — 7.2 needs 7.1 to accumulate real "clean" runs
+before it's worth building, and 7.4 (the actual prompt-tuning loop) is
+deliberately the last piece, per the human-approval design in Phase 7's
+intro. What's deliberately still open otherwise, not because it was missed
+but because it needs something this repo alone can't provide:
 
 - **Event feeds are disabled by default** (`EVENT_FEEDS_ENABLED=false`) —
   enable deliberately in `.env` when ready to let earthquakes/weather

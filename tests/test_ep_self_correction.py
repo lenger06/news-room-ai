@@ -225,6 +225,10 @@ async def _run_process_message_with_fake_final_state(ep, state_overrides, monkey
         return state
 
     monkeypatch.setattr(ep.workflow, "ainvoke", fake_ainvoke)
+    # process_message() also records to tools/agent_outcomes.py (Phase 7.1) — no-op it
+    # here so these tests don't write into the real project's ./output/agent_outcomes.json.
+    import tools.agent_outcomes as agent_outcomes
+    monkeypatch.setattr(agent_outcomes, "record", lambda **kwargs: None)
     return await ep.process_message("test request")
 
 
