@@ -1,0 +1,89 @@
+{
+  "info": {
+    "name": "HeyGen V3 - Background Color Test",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Minimal, standalone test for one specific question: does V3 actually honor the requested background.value color for a photo_avatar-type avatar? On 2026-07-26, the same request against Daniel Mercer (avatar_type=digital_twin, engine=avatar_iv) silently rendered flat gray instead of the requested #00FF00 green (video had a 'Veo' watermark, suggesting that avatar type may render through Google Veo rather than HeyGen's own renderer). Zayne Carter is avatar_type=photo_avatar - a different underlying avatar type, not yet tested. Set HEYGEN_API_KEY before use."
+  },
+  "variable": [
+    { "key": "HEYGEN_API_KEY", "value": "", "type": "string" },
+    { "key": "base_url", "value": "https://api.heygen.com", "type": "string" },
+    { "key": "video_id", "value": "", "type": "string", "description": "Auto-populated by the Submit request's test script" }
+  ],
+  "item": [
+    {
+      "name": "1. Submit - Zayne Carter, green bg, avatar_iv",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/v3/videos",
+        "header": [
+          { "key": "x-api-key", "value": "{{HEYGEN_API_KEY}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"5c71aeacd9fc4b4f91c50312180f189b\",\n  \"script\": \"Good evening, I'm Zayne Carter. This is a background color test for the version 3 API.\",\n  \"voice_id\": \"82aa66b207d641bdbfacca4174cfa326\",\n  \"background\": {\n    \"type\": \"color\",\n    \"value\": \"#00FF00\"\n  },\n  \"engine\": {\n    \"type\": \"avatar_iv\"\n  },\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Background Color Test - Zayne Carter avatar_iv\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "Zayne Carter (photo_avatar type, not digital_twin/PAOS) with the same #00FF00 green background request that silently came out gray for Daniel Mercer. No motion_prompt included, to keep this test isolated to the background-color question only."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var json = pm.response.json();",
+              "var id = ((json.data || {}).video_id) || ((json.data || {}).id) || json.video_id;",
+              "if (id) { pm.collectionVariables.set('video_id', id); console.log('video_id set:', id); }",
+              "else { console.log('No video_id in response:', JSON.stringify(json)); }"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "1b. Submit - Zayne Carter, green bg, avatar_v (alternate engine)",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/v3/videos",
+        "header": [
+          { "key": "x-api-key", "value": "{{HEYGEN_API_KEY}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"5c71aeacd9fc4b4f91c50312180f189b\",\n  \"script\": \"Good evening, I'm Zayne Carter. This is a background color test using the avatar_v engine.\",\n  \"voice_id\": \"82aa66b207d641bdbfacca4174cfa326\",\n  \"background\": {\n    \"type\": \"color\",\n    \"value\": \"#00FF00\"\n  },\n  \"engine\": {\n    \"type\": \"avatar_v\"\n  },\n  \"motion_prompt\": \"Professional broadcast news anchor. Composed, confident posture.\",\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Background Color Test - Zayne Carter avatar_v\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "description": "Only run this one if #1 also comes back gray (or another wrong color) - isolates whether it's an avatar_iv-specific issue or affects avatar_v too. Zayne supports avatar_v per the roster capability audit, so motion_prompt is safe to include here."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var json = pm.response.json();",
+              "var id = ((json.data || {}).video_id) || ((json.data || {}).id) || json.video_id;",
+              "if (id) { pm.collectionVariables.set('video_id', id); console.log('video_id set:', id); }",
+              "else { console.log('No video_id in response:', JSON.stringify(json)); }"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Check Status (poll every 15-30s)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/v3/videos/{{video_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["v3", "videos", "{{video_id}}"]
+        },
+        "header": [{ "key": "x-api-key", "value": "{{HEYGEN_API_KEY}}" }],
+        "description": "Re-send this every 15-30s until data.status == 'completed'. Then open data.video_url in a browser and look at the background: is it actually solid green (#00FF00), or did it come out some other flat color again? Also check for a 'Veo' watermark in the corner - if present, that avatar/engine combo is likely rendering through Google Veo rather than HeyGen's own pipeline, which may explain why the color param isn't honored."
+      }
+    }
+  ]
+}

@@ -2,13 +2,30 @@
   "info": {
     "name": "HeyGen V3",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "HeyGen API v3 — Avatar V engine testing. Set the HEYGEN_API_KEY variable before use."
+    "description": "HeyGen API v3 \u2014 Avatar V engine testing. Set the HEYGEN_API_KEY variable before use."
   },
   "variable": [
-    { "key": "HEYGEN_API_KEY", "value": "", "type": "string" },
-    { "key": "base_url",       "value": "https://api.heygen.com", "type": "string" },
-    { "key": "upload_url",     "value": "https://upload.heygen.com", "type": "string" },
-    { "key": "video_id",       "value": "", "type": "string", "description": "Populated by 'Create V3 Video' tests via post-response script" }
+    {
+      "key": "HEYGEN_API_KEY",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "base_url",
+      "value": "https://api.heygen.com",
+      "type": "string"
+    },
+    {
+      "key": "upload_url",
+      "value": "https://upload.heygen.com",
+      "type": "string"
+    },
+    {
+      "key": "video_id",
+      "value": "",
+      "type": "string",
+      "description": "Populated by 'Create V3 Video' tests via post-response script"
+    }
   ],
   "item": [
     {
@@ -19,7 +36,12 @@
           "request": {
             "method": "GET",
             "url": "{{base_url}}/v2/user/remaining_quota",
-            "header": [{ "key": "x-api-key", "value": "{{HEYGEN_API_KEY}}" }]
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ]
           }
         }
       ]
@@ -32,7 +54,12 @@
           "request": {
             "method": "GET",
             "url": "{{base_url}}/v2/avatars",
-            "header": [{ "key": "x-api-key", "value": "{{HEYGEN_API_KEY}}" }],
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
             "description": "Returns all available avatars. Filter by supported_api_engines containing 'avatar_v' to find PAOS / Avatar V compatible looks."
           }
         },
@@ -41,7 +68,12 @@
           "request": {
             "method": "GET",
             "url": "{{base_url}}/v2/voices",
-            "header": [{ "key": "x-api-key", "value": "{{HEYGEN_API_KEY}}" }]
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ]
           }
         },
         {
@@ -50,10 +82,21 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/v1/asset/REPLACE_WITH_ASSET_ID",
-              "host": ["{{base_url}}"],
-              "path": ["v1", "asset", "REPLACE_WITH_ASSET_ID"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "asset",
+                "REPLACE_WITH_ASSET_ID"
+              ]
             },
-            "header": [{ "key": "x-api-key", "value": "{{HEYGEN_API_KEY}}" }]
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ]
           }
         }
       ]
@@ -67,14 +110,20 @@
             "method": "POST",
             "url": "{{upload_url}}/v1/asset",
             "header": [
-              { "key": "X-Api-Key",     "value": "{{HEYGEN_API_KEY}}" },
-              { "key": "Content-Type",  "value": "image/jpeg" }
+              {
+                "key": "X-Api-Key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "image/jpeg"
+              }
             ],
             "body": {
               "mode": "file",
               "file": {}
             },
-            "description": "Upload a JPEG or PNG to use as a v3 background. Returns { data: { id: '...' } } — use that id as asset_id in background."
+            "description": "Upload a JPEG or PNG to use as a v3 background. Returns { data: { id: '...' } } \u2014 use that id as asset_id in background."
           },
           "event": [
             {
@@ -96,32 +145,53 @@
             "method": "DELETE",
             "url": {
               "raw": "{{base_url}}/v1/asset/REPLACE_WITH_ASSET_ID",
-              "host": ["{{base_url}}"],
-              "path": ["v1", "asset", "REPLACE_WITH_ASSET_ID"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "asset",
+                "REPLACE_WITH_ASSET_ID"
+              ]
             },
-            "header": [{ "key": "x-api-key", "value": "{{HEYGEN_API_KEY}}" }]
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ]
           }
         }
       ]
     },
     {
-      "name": "V3 Video — Create",
+      "name": "V3 Video \u2014 Create",
       "item": [
         {
-          "name": "Avatar V — Color Background",
+          "name": "Avatar V \u2014 Color Background",
           "request": {
             "method": "POST",
             "url": "{{base_url}}/v3/videos",
             "header": [
-              { "key": "x-api-key",     "value": "{{HEYGEN_API_KEY}}" },
-              { "key": "Content-Type",  "value": "application/json" }
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"REPLACE_WITH_AVATAR_LOOK_ID\",\n  \"script\": \"Welcome to Defy Logic News. This is a test of the Avatar V engine with a solid color background.\",\n  \"voice_id\": \"REPLACE_WITH_VOICE_ID\",\n  \"background\": {\n    \"type\": \"color\",\n    \"value\": \"#0d1b2a\"\n  },\n  \"engine\": {\n    \"type\": \"avatar_v\"\n  },\n  \"motion_prompt\": \"Professional broadcast news anchor. Composed, confident posture. Subtle, deliberate hand gestures to emphasize key points.\",\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"V3 Color BG Test\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "description": "Minimal v3 payload — solid color background. No remove_background, no voice_settings.emotion (both cause render failure in v3)."
+            "description": "Minimal v3 payload \u2014 solid color background. No remove_background, no voice_settings.emotion (both cause render failure in v3)."
           },
           "event": [
             {
@@ -138,20 +208,30 @@
           ]
         },
         {
-          "name": "Avatar V — Image Background (uploaded asset)",
+          "name": "Avatar V \u2014 Image Background (uploaded asset)",
           "request": {
             "method": "POST",
             "url": "{{base_url}}/v3/videos",
             "header": [
-              { "key": "x-api-key",     "value": "{{HEYGEN_API_KEY}}" },
-              { "key": "Content-Type",  "value": "application/json" }
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"REPLACE_WITH_AVATAR_LOOK_ID\",\n  \"script\": \"Good evening. This test uses an uploaded image as the studio background behind the Avatar V anchor.\",\n  \"voice_id\": \"REPLACE_WITH_VOICE_ID\",\n  \"background\": {\n    \"type\": \"image\",\n    \"asset_id\": \"REPLACE_WITH_ASSET_ID\"\n  },\n  \"engine\": {\n    \"type\": \"avatar_v\"\n  },\n  \"motion_prompt\": \"Professional broadcast news anchor. Composed, confident posture. Natural head movements when transitioning between topics.\",\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"V3 Image BG Test\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "description": "V3 with image background. background.type must be 'image' (not 'video' — v3 rejects 'video'). Use asset_id from the Upload Image Asset request."
+            "description": "V3 with image background. background.type must be 'image' (not 'video' \u2014 v3 rejects 'video'). Use asset_id from the Upload Image Asset request."
           },
           "event": [
             {
@@ -168,20 +248,30 @@
           ]
         },
         {
-          "name": "Avatar V — Marco Reyes (office look)",
+          "name": "Avatar V \u2014 Marco Reyes (office look)",
           "request": {
             "method": "POST",
             "url": "{{base_url}}/v3/videos",
             "header": [
-              { "key": "x-api-key",     "value": "{{HEYGEN_API_KEY}}" },
-              { "key": "Content-Type",  "value": "application/json" }
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"3ccc4060113043f0a92681d1ed56f4d0\",\n  \"script\": \"Good evening. I'm Marco Reyes. This is a test of the Avatar V engine with the Marco Reyes PAOS avatar.\",\n  \"voice_id\": \"544053989dc94655915bc864a5f81b53\",\n  \"background\": {\n    \"type\": \"color\",\n    \"value\": \"#0d1b2a\"\n  },\n  \"engine\": {\n    \"type\": \"avatar_v\"\n  },\n  \"motion_prompt\": \"Professional broadcast news anchor. Composed, confident posture. Subtle, deliberate hand gestures.\",\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Marco Reyes V3 Test\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "description": "Uses the Marco Reyes PAOS look (office, front-facing). Avatar V engine only — this look_id is not compatible with v2."
+            "description": "Uses the Marco Reyes PAOS look (office, front-facing). Avatar V engine only \u2014 this look_id is not compatible with v2."
           },
           "event": [
             {
@@ -198,18 +288,28 @@
           ]
         },
         {
-          "name": "Avatar V — Elise Navarro",
+          "name": "Avatar V \u2014 Elise Navarro",
           "request": {
             "method": "POST",
             "url": "{{base_url}}/v3/videos",
             "header": [
-              { "key": "x-api-key",     "value": "{{HEYGEN_API_KEY}}" },
-              { "key": "Content-Type",  "value": "application/json" }
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"21cb3594f3934b14b688e001ef67d779\",\n  \"script\": \"Good evening. I'm Elise Navarro. This is a test of the Avatar V engine with the Elise Navarro PAOS avatar.\",\n  \"voice_id\": \"e054554137024015b09bbfa1c1ace96d\",\n  \"background\": {\n    \"type\": \"color\",\n    \"value\": \"#0d1b2a\"\n  },\n  \"engine\": {\n    \"type\": \"avatar_v\"\n  },\n  \"motion_prompt\": \"Professional broadcast news anchor. Composed, confident posture. Subtle, deliberate hand gestures.\",\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Elise Navarro V3 Test\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "event": [
@@ -227,18 +327,28 @@
           ]
         },
         {
-          "name": "Avatar V — Elena Vasquez",
+          "name": "Avatar V \u2014 Elena Vasquez",
           "request": {
             "method": "POST",
             "url": "{{base_url}}/v3/videos",
             "header": [
-              { "key": "x-api-key",     "value": "{{HEYGEN_API_KEY}}" },
-              { "key": "Content-Type",  "value": "application/json" }
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"33c459f870d541f09c6733189b557d23\",\n  \"script\": \"Good evening. I'm Elena Vasquez. This is a test of the Avatar V engine with the Elena Vasquez PAOS avatar.\",\n  \"voice_id\": \"ac7d71d630d041a7b90473492c6d9a1c\",\n  \"background\": {\n    \"type\": \"color\",\n    \"value\": \"#0d1b2a\"\n  },\n  \"engine\": {\n    \"type\": \"avatar_v\"\n  },\n  \"motion_prompt\": \"Professional broadcast news anchor. Composed, confident posture. Subtle, deliberate hand gestures.\",\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Elena Vasquez V3 Test\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "event": [
@@ -256,26 +366,36 @@
           ]
         },
         {
-          "name": "Avatar V — No Engine (fallback test)",
+          "name": "Avatar V \u2014 No Engine (fallback test)",
           "request": {
             "method": "POST",
             "url": "{{base_url}}/v3/videos",
             "header": [
-              { "key": "x-api-key",     "value": "{{HEYGEN_API_KEY}}" },
-              { "key": "Content-Type",  "value": "application/json" }
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"REPLACE_WITH_AVATAR_LOOK_ID\",\n  \"script\": \"This test omits the engine field to test HeyGen default engine selection in v3.\",\n  \"voice_id\": \"REPLACE_WITH_VOICE_ID\",\n  \"background\": {\n    \"type\": \"color\",\n    \"value\": \"#0d1b2a\"\n  },\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"V3 No Engine Field Test\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "description": "Same payload without the engine field — tests whether HeyGen auto-selects Avatar V for PAOS looks or falls back to a different engine."
+            "description": "Same payload without the engine field \u2014 tests whether HeyGen auto-selects Avatar V for PAOS looks or falls back to a different engine."
           }
         }
       ]
     },
     {
-      "name": "V3 Video — Status & Retrieve",
+      "name": "V3 Video \u2014 Status & Retrieve",
       "item": [
         {
           "name": "Get Video Status (v3)",
@@ -283,23 +403,45 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/v3/videos/{{video_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["v3", "videos", "{{video_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "videos",
+                "{{video_id}}"
+              ]
             },
-            "header": [{ "key": "x-api-key", "value": "{{HEYGEN_API_KEY}}" }],
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
             "description": "Poll every 30s. status: 'processing' | 'completed' | 'failed'. video_url is populated when completed."
           }
         },
         {
-          "name": "Get Video Status (v3) — explicit ID",
+          "name": "Get Video Status (v3) \u2014 explicit ID",
           "request": {
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/v3/videos/REPLACE_WITH_VIDEO_ID",
-              "host": ["{{base_url}}"],
-              "path": ["v3", "videos", "REPLACE_WITH_VIDEO_ID"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "videos",
+                "REPLACE_WITH_VIDEO_ID"
+              ]
             },
-            "header": [{ "key": "x-api-key", "value": "{{HEYGEN_API_KEY}}" }]
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ]
           }
         },
         {
@@ -308,17 +450,32 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/v1/video.list?limit=10",
-              "host": ["{{base_url}}"],
-              "path": ["v1", "video.list"],
-              "query": [{ "key": "limit", "value": "10" }]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "video.list"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
             },
-            "header": [{ "key": "x-api-key", "value": "{{HEYGEN_API_KEY}}" }]
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ]
           }
         }
       ]
     },
     {
-      "name": "V2 Video — Reference (pip_v2 baseline)",
+      "name": "V2 Video \u2014 Reference (pip_v2 baseline)",
       "item": [
         {
           "name": "Create V2 Single Scene (caption bool)",
@@ -326,15 +483,25 @@
             "method": "POST",
             "url": "{{base_url}}/v2/video/generate",
             "header": [
-              { "key": "x-api-key",     "value": "{{HEYGEN_API_KEY}}" },
-              { "key": "Content-Type",  "value": "application/json" }
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"video_inputs\": [\n    {\n      \"character\": {\n        \"type\": \"avatar\",\n        \"avatar_id\": \"REPLACE_WITH_AVATAR_LOOK_ID\",\n        \"avatar_style\": \"normal\",\n        \"matting\": true\n      },\n      \"voice\": {\n        \"type\": \"text\",\n        \"input_text\": \"This is a v2 baseline test. Caption is a boolean in v2, not a style object.\",\n        \"voice_id\": \"REPLACE_WITH_VOICE_ID\",\n        \"emotion\": \"Broadcaster\"\n      },\n      \"background\": {\n        \"type\": \"video\",\n        \"video_asset_id\": \"REPLACE_WITH_BG_VIDEO_ASSET_ID\",\n        \"play_style\": \"loop\"\n      }\n    }\n  ],\n  \"dimension\": { \"width\": 1280, \"height\": 720 },\n  \"title\": \"V2 Baseline Test\",\n  \"caption\": true\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "description": "V2 multi-scene format. caption must be a boolean (true/false) — NOT a dict like {style: 'classic'}. The v2 endpoint is legacy and will be removed; migrate to v3."
+            "description": "V2 multi-scene format. caption must be a boolean (true/false) \u2014 NOT a dict like {style: 'classic'}. The v2 endpoint is legacy and will be removed; migrate to v3."
           }
         }
       ]
@@ -343,72 +510,1131 @@
       "name": "Known Gotchas (read me)",
       "item": [
         {
-          "name": "❌ V3 — video background (rejected)",
+          "name": "\u274c V3 \u2014 video background (rejected)",
           "request": {
             "method": "POST",
             "url": "{{base_url}}/v3/videos",
             "header": [
-              { "key": "x-api-key",     "value": "{{HEYGEN_API_KEY}}" },
-              { "key": "Content-Type",  "value": "application/json" }
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"REPLACE_WITH_AVATAR_LOOK_ID\",\n  \"script\": \"This will fail — v3 does not accept video backgrounds.\",\n  \"voice_id\": \"REPLACE_WITH_VOICE_ID\",\n  \"background\": {\n    \"type\": \"video\",\n    \"video_asset_id\": \"REPLACE_WITH_ASSET_ID\"\n  },\n  \"engine\": { \"type\": \"avatar_v\" },\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Will Return 400\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"REPLACE_WITH_AVATAR_LOOK_ID\",\n  \"script\": \"This will fail \u2014 v3 does not accept video backgrounds.\",\n  \"voice_id\": \"REPLACE_WITH_VOICE_ID\",\n  \"background\": {\n    \"type\": \"video\",\n    \"video_asset_id\": \"REPLACE_WITH_ASSET_ID\"\n  },\n  \"engine\": { \"type\": \"avatar_v\" },\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Will Return 400\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "description": "EXPECTED FAILURE: HTTP 400 'Input should be color or image'. V3 background.type only accepts 'color' or 'image'. To use a video BG, extract a frame as JPEG, upload it, and use that asset_id with type:'image'."
           }
         },
         {
-          "name": "❌ V3 — voice_settings emotion (rejected)",
+          "name": "\u274c V3 \u2014 voice_settings emotion (rejected)",
           "request": {
             "method": "POST",
             "url": "{{base_url}}/v3/videos",
             "header": [
-              { "key": "x-api-key",     "value": "{{HEYGEN_API_KEY}}" },
-              { "key": "Content-Type",  "value": "application/json" }
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"REPLACE_WITH_AVATAR_LOOK_ID\",\n  \"script\": \"This will fail — v3 does not accept voice_settings with emotion.\",\n  \"voice_id\": \"REPLACE_WITH_VOICE_ID\",\n  \"voice_settings\": {\n    \"emotion\": \"Broadcaster\"\n  },\n  \"background\": { \"type\": \"color\", \"value\": \"#0d1b2a\" },\n  \"engine\": { \"type\": \"avatar_v\" },\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Will Fail at Render\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"REPLACE_WITH_AVATAR_LOOK_ID\",\n  \"script\": \"This will fail \u2014 v3 does not accept voice_settings with emotion.\",\n  \"voice_id\": \"REPLACE_WITH_VOICE_ID\",\n  \"voice_settings\": {\n    \"emotion\": \"Broadcaster\"\n  },\n  \"background\": { \"type\": \"color\", \"value\": \"#0d1b2a\" },\n  \"engine\": { \"type\": \"avatar_v\" },\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Will Fail at Render\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "description": "EXPECTED FAILURE: Submits OK (HTTP 200) but render fails with 'failed' status. V3 voice_settings does not support emotion — drop that field entirely."
+            "description": "EXPECTED FAILURE: Submits OK (HTTP 200) but render fails with 'failed' status. V3 voice_settings does not support emotion \u2014 drop that field entirely."
           }
         },
         {
-          "name": "❌ V3 — remove_background (causes render failure)",
+          "name": "\u274c V3 \u2014 remove_background (causes render failure)",
           "request": {
             "method": "POST",
             "url": "{{base_url}}/v3/videos",
             "header": [
-              { "key": "x-api-key",     "value": "{{HEYGEN_API_KEY}}" },
-              { "key": "Content-Type",  "value": "application/json" }
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"REPLACE_WITH_AVATAR_LOOK_ID\",\n  \"script\": \"This may fail at render — remove_background requires matting-enabled training.\",\n  \"voice_id\": \"REPLACE_WITH_VOICE_ID\",\n  \"background\": { \"type\": \"color\", \"value\": \"#0d1b2a\" },\n  \"remove_background\": true,\n  \"engine\": { \"type\": \"avatar_v\" },\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"remove_background Test\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"REPLACE_WITH_AVATAR_LOOK_ID\",\n  \"script\": \"This may fail at render \u2014 remove_background requires matting-enabled training.\",\n  \"voice_id\": \"REPLACE_WITH_VOICE_ID\",\n  \"background\": { \"type\": \"color\", \"value\": \"#0d1b2a\" },\n  \"remove_background\": true,\n  \"engine\": { \"type\": \"avatar_v\" },\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"remove_background Test\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "description": "LIKELY FAILURE: remove_background requires the avatar to have 'matting-enabled training'. PAOS avatars (Marco, Elise, Elena) do not appear to support it — produces render failure."
+            "description": "LIKELY FAILURE: remove_background requires the avatar to have 'matting-enabled training'. PAOS avatars (Marco, Elise, Elena) do not appear to support it \u2014 produces render failure."
           }
         },
         {
-          "name": "❌ V2 — caption as dict (rejected)",
+          "name": "\u274c V2 \u2014 caption as dict (rejected)",
           "request": {
             "method": "POST",
             "url": "{{base_url}}/v2/video/generate",
             "header": [
-              { "key": "x-api-key",     "value": "{{HEYGEN_API_KEY}}" },
-              { "key": "Content-Type",  "value": "application/json" }
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"video_inputs\": [\n    {\n      \"character\": { \"type\": \"avatar\", \"avatar_id\": \"REPLACE_WITH_AVATAR_LOOK_ID\", \"avatar_style\": \"normal\" },\n      \"voice\": { \"type\": \"text\", \"input_text\": \"This will fail — caption must be boolean in v2.\", \"voice_id\": \"REPLACE_WITH_VOICE_ID\" },\n      \"background\": { \"type\": \"color\", \"value\": \"#0d1b2a\" }\n    }\n  ],\n  \"dimension\": { \"width\": 1280, \"height\": 720 },\n  \"title\": \"V2 Caption Dict — Will Fail\",\n  \"caption\": { \"style\": \"classic\" }\n}",
-              "options": { "raw": { "language": "json" } }
+              "raw": "{\n  \"video_inputs\": [\n    {\n      \"character\": { \"type\": \"avatar\", \"avatar_id\": \"REPLACE_WITH_AVATAR_LOOK_ID\", \"avatar_style\": \"normal\" },\n      \"voice\": { \"type\": \"text\", \"input_text\": \"This will fail \u2014 caption must be boolean in v2.\", \"voice_id\": \"REPLACE_WITH_VOICE_ID\" },\n      \"background\": { \"type\": \"color\", \"value\": \"#0d1b2a\" }\n    }\n  ],\n  \"dimension\": { \"width\": 1280, \"height\": 720 },\n  \"title\": \"V2 Caption Dict \u2014 Will Fail\",\n  \"caption\": { \"style\": \"classic\" }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "description": "EXPECTED FAILURE: HTTP 400 'caption is invalid: Input should be a valid boolean'. In v2, caption must be true or false, not a CaptionSetting object."
           }
+        }
+      ]
+    },
+    {
+      "name": "Migration - Roster Capability Check",
+      "description": "Read-only, free (no credits spent). One GET per distinct avatar look in config/anchors.py, as of 2026-07-26 - re-run any time to check for HeyGen platform changes. See HEYGEN_V3_MIGRATION_PLAN.md section 3 for the full audit table this was built from.",
+      "item": [
+        {
+          "name": "Shawn Green \u2014 Shawn_Suit_Front_public",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/Shawn_Suit_Front_public",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "Shawn_Suit_Front_public"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Shawn Green (look 2) \u2014 Shawn_Sitting_Front_public",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/Shawn_Sitting_Front_public",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "Shawn_Sitting_Front_public"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Shawn Green (look 3) \u2014 Shawn_Casual_Sitting_Front_public",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/Shawn_Casual_Sitting_Front_public",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "Shawn_Casual_Sitting_Front_public"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Dominic Fairchild \u2014 f7bd87b360d143faadb4ded248f86299",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/f7bd87b360d143faadb4ded248f86299",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "f7bd87b360d143faadb4ded248f86299"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Alexa Chen \u2014 a5454d8b999d4e5f87f486605465aae4",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/a5454d8b999d4e5f87f486605465aae4",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "a5454d8b999d4e5f87f486605465aae4"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Zayne Carter \u2014 5c71aeacd9fc4b4f91c50312180f189b",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/5c71aeacd9fc4b4f91c50312180f189b",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "5c71aeacd9fc4b4f91c50312180f189b"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Zayne Carter (look 2) \u2014 1751694ccea0415eb8155ff49ce76255",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/1751694ccea0415eb8155ff49ce76255",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "1751694ccea0415eb8155ff49ce76255"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Monica Hayes \u2014 Saskia_public_1",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/Saskia_public_1",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "Saskia_public_1"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Monica Hayes (look 2) \u2014 Saskia_public_3",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/Saskia_public_3",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "Saskia_public_3"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Monica Hayes (look 3) \u2014 Saskia_public_4",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/Saskia_public_4",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "Saskia_public_4"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Valerie Brooks \u2014 Candace_Beige_Dress_Front",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/Candace_Beige_Dress_Front",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "Candace_Beige_Dress_Front"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Valerie Brooks (look 2) \u2014 Candace_Pink_Blazer_Front",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/Candace_Pink_Blazer_Front",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "Candace_Pink_Blazer_Front"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Nicholas Stavros \u2014 3581241b5df64bd9a331bebda862a637",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/3581241b5df64bd9a331bebda862a637",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "3581241b5df64bd9a331bebda862a637"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Victor Marinos \u2014 fecbc666fa2d4c4ba1c3d0b85cb4c6e5",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/fecbc666fa2d4c4ba1c3d0b85cb4c6e5",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "fecbc666fa2d4c4ba1c3d0b85cb4c6e5"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Victor Marinos (look 2) \u2014 f3de1e1f0d1f48619660b9efe90eddb7",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/f3de1e1f0d1f48619660b9efe90eddb7",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "f3de1e1f0d1f48619660b9efe90eddb7"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Victor Marinos (look 3) \u2014 5154fcc7f8c045e386676d834d7f4b2e",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/5154fcc7f8c045e386676d834d7f4b2e",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "5154fcc7f8c045e386676d834d7f4b2e"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Daniel Mercer \u2014 cbc2c423747542eda390ffaeb269202c",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/cbc2c423747542eda390ffaeb269202c",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "cbc2c423747542eda390ffaeb269202c"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Karoline Faye \u2014 f48550dcc6f648adacc6593f1d315234",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/f48550dcc6f648adacc6593f1d315234",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "f48550dcc6f648adacc6593f1d315234"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Karoline Faye (look 2) \u2014 ee21a3956e23413d8ac349901f8184d9",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/ee21a3956e23413d8ac349901f8184d9",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "ee21a3956e23413d8ac349901f8184d9"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Brandon Jones \u2014 Brandon_expressive2_public",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/Brandon_expressive2_public",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "Brandon_expressive2_public"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Alister Blackwood \u2014 Dexter_Suit_Front_public",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/Dexter_Suit_Front_public",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "Dexter_Suit_Front_public"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Darlene Smith \u2014 cae4682f73324118b402da17dcbb1b68",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/cae4682f73324118b402da17dcbb1b68",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "cae4682f73324118b402da17dcbb1b68"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Marco Reyes \u2014 3ccc4060113043f0a92681d1ed56f4d0",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/3ccc4060113043f0a92681d1ed56f4d0",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "3ccc4060113043f0a92681d1ed56f4d0"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Marco Reyes (look 2) \u2014 daee99179dd644a5bdd46ecf95064eeb",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/daee99179dd644a5bdd46ecf95064eeb",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "daee99179dd644a5bdd46ecf95064eeb"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Marco Reyes (look 3) \u2014 fbee11f583244c1095136b049cd1bbd2",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/fbee11f583244c1095136b049cd1bbd2",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "fbee11f583244c1095136b049cd1bbd2"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Elise Navarro \u2014 21cb3594f3934b14b688e001ef67d779",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/21cb3594f3934b14b688e001ef67d779",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "21cb3594f3934b14b688e001ef67d779"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        },
+        {
+          "name": "Elena Vasquez \u2014 33c459f870d541f09c6733189b557d23",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v3/avatars/looks/33c459f870d541f09c6733189b557d23",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v3",
+                "avatars",
+                "looks",
+                "33c459f870d541f09c6733189b557d23"
+              ]
+            },
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              }
+            ],
+            "description": "Check data.avatar_type and data.supported_api_engines. studio_avatar type = avatar_iii only (no motion_prompt/expressiveness). digital_twin/photo_avatar type = usually avatar_v+avatar_iv+avatar_iii."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Migration - Option D: Matting Hypothesis",
+      "description": "COSTS CREDITS - run deliberately, not automatically. Tests remove_background on avatar types not covered by the existing 'Known Gotchas' section (which only tested PAOS/avatar_v and found matting failed there). If these succeed, the existing FFmpeg background/PiP pipeline can be kept entirely intact - see HEYGEN_V3_MIGRATION_PLAN.md Option D.",
+      "item": [
+        {
+          "name": "Matting test - Daniel Mercer (digital_twin) (avatar_iv)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/v3/videos",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"cbc2c423747542eda390ffaeb269202c\",\n  \"script\": \"Good evening. This is a matting test using the avatar_iv engine.\",\n  \"voice_id\": \"PJXRwHpW7osOhD6GiW1M\",\n  \"background\": {\n    \"type\": \"color\",\n    \"value\": \"#00FF00\"\n  },\n  \"remove_background\": true,\n  \"engine\": {\n    \"type\": \"avatar_iv\"\n  },\n  \"motion_prompt\": \"Professional broadcast news anchor. Composed, confident posture.\",\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Matting Hypothesis - Daniel Mercer (digital_twin)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Tests whether remove_background/matting works for this avatar_type (digital_twin or non-PAOS photo_avatar) - this specific combination was NOT covered by the existing gotcha notes, which only tested PAOS avatars (photo_avatar via avatar_v) and found matting failed there. If this renders with a clean chroma-key-able edge (green background removed), Option D in HEYGEN_V3_MIGRATION_PLAN.md is viable: keep the existing FFmpeg background/PiP pipeline entirely, just swap in this matted V3 clip as the avatar source. Check output frame-by-frame for matting artifacts around hair/edges before deciding."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "var id = ((json.data || {}).video_id) || ((json.data || {}).id) || json.video_id;",
+                  "if (id) { pm.collectionVariables.set('video_id', id); console.log('video_id set:', id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Matting test - Daniel Mercer (digital_twin) (avatar_v)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/v3/videos",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"cbc2c423747542eda390ffaeb269202c\",\n  \"script\": \"Good evening. This is a matting test using the avatar_v engine.\",\n  \"voice_id\": \"PJXRwHpW7osOhD6GiW1M\",\n  \"background\": {\n    \"type\": \"color\",\n    \"value\": \"#00FF00\"\n  },\n  \"remove_background\": true,\n  \"engine\": {\n    \"type\": \"avatar_v\"\n  },\n  \"motion_prompt\": \"Professional broadcast news anchor. Composed, confident posture.\",\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Matting Hypothesis - Daniel Mercer (digital_twin)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Tests whether remove_background/matting works for this avatar_type (digital_twin or non-PAOS photo_avatar) - this specific combination was NOT covered by the existing gotcha notes, which only tested PAOS avatars (photo_avatar via avatar_v) and found matting failed there. If this renders with a clean chroma-key-able edge (green background removed), Option D in HEYGEN_V3_MIGRATION_PLAN.md is viable: keep the existing FFmpeg background/PiP pipeline entirely, just swap in this matted V3 clip as the avatar source. Check output frame-by-frame for matting artifacts around hair/edges before deciding."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "var id = ((json.data || {}).video_id) || ((json.data || {}).id) || json.video_id;",
+                  "if (id) { pm.collectionVariables.set('video_id', id); console.log('video_id set:', id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Matting test - Zayne Carter (photo_avatar, non-PAOS) (avatar_iv)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/v3/videos",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"5c71aeacd9fc4b4f91c50312180f189b\",\n  \"script\": \"Good evening. This is a matting test using the avatar_iv engine.\",\n  \"voice_id\": \"82aa66b207d641bdbfacca4174cfa326\",\n  \"background\": {\n    \"type\": \"color\",\n    \"value\": \"#00FF00\"\n  },\n  \"remove_background\": true,\n  \"engine\": {\n    \"type\": \"avatar_iv\"\n  },\n  \"motion_prompt\": \"Professional broadcast news anchor. Composed, confident posture.\",\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Matting Hypothesis - Zayne Carter (photo_avatar, non-PAOS)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Tests whether remove_background/matting works for this avatar_type (digital_twin or non-PAOS photo_avatar) - this specific combination was NOT covered by the existing gotcha notes, which only tested PAOS avatars (photo_avatar via avatar_v) and found matting failed there. If this renders with a clean chroma-key-able edge (green background removed), Option D in HEYGEN_V3_MIGRATION_PLAN.md is viable: keep the existing FFmpeg background/PiP pipeline entirely, just swap in this matted V3 clip as the avatar source. Check output frame-by-frame for matting artifacts around hair/edges before deciding."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "var id = ((json.data || {}).video_id) || ((json.data || {}).id) || json.video_id;",
+                  "if (id) { pm.collectionVariables.set('video_id', id); console.log('video_id set:', id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Matting test - Zayne Carter (photo_avatar, non-PAOS) (avatar_v)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/v3/videos",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"5c71aeacd9fc4b4f91c50312180f189b\",\n  \"script\": \"Good evening. This is a matting test using the avatar_v engine.\",\n  \"voice_id\": \"82aa66b207d641bdbfacca4174cfa326\",\n  \"background\": {\n    \"type\": \"color\",\n    \"value\": \"#00FF00\"\n  },\n  \"remove_background\": true,\n  \"engine\": {\n    \"type\": \"avatar_v\"\n  },\n  \"motion_prompt\": \"Professional broadcast news anchor. Composed, confident posture.\",\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Matting Hypothesis - Zayne Carter (photo_avatar, non-PAOS)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Tests whether remove_background/matting works for this avatar_type (digital_twin or non-PAOS photo_avatar) - this specific combination was NOT covered by the existing gotcha notes, which only tested PAOS avatars (photo_avatar via avatar_v) and found matting failed there. If this renders with a clean chroma-key-able edge (green background removed), Option D in HEYGEN_V3_MIGRATION_PLAN.md is viable: keep the existing FFmpeg background/PiP pipeline entirely, just swap in this matted V3 clip as the avatar source. Check output frame-by-frame for matting artifacts around hair/edges before deciding."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "var id = ((json.data || {}).video_id) || ((json.data || {}).id) || json.video_id;",
+                  "if (id) { pm.collectionVariables.set('video_id', id); console.log('video_id set:', id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Migration - Option A: V3 Studio API Multi-Scene",
+      "description": "COSTS CREDITS - run deliberately. Real type:'studio' request: avatar talks, cuts away to a full-screen narrated image (b-roll), cuts back to the avatar. This is the sequential-cutaway visual style described in HEYGEN_V3_MIGRATION_PLAN.md Option A - no PiP, no moving backdrop (avatar_video scenes are solid-color only), but genuine multi-scene support. Judge the output on its own terms as a different visual style, not as a PiP replacement. Replace the placeholder image URL with a real sourced b-roll image before judging quality.",
+      "item": [
+        {
+          "name": "Studio API - Avatar + B-Roll Cutaway + Avatar",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/v3/videos",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"studio\",\n  \"scenes\": [\n    {\n      \"type\": \"avatar_video\",\n      \"input\": {\n        \"type\": \"avatar\",\n        \"avatar_id\": \"cbc2c423747542eda390ffaeb269202c\",\n        \"script\": \"Good evening, I'm Daniel Mercer. Tonight, we look at the latest developments in the region.\",\n        \"voice_id\": \"PJXRwHpW7osOhD6GiW1M\",\n        \"background\": {\n          \"type\": \"color\",\n          \"color\": \"#0d1b2a\"\n        }\n      }\n    },\n    {\n      \"type\": \"image\",\n      \"source\": {\n        \"type\": \"url\",\n        \"url\": \"https://images.unsplash.com/photo-1495020689067-958852a7765e\"\n      },\n      \"script\": \"Officials say the situation continues to develop, with residents watching closely for updates.\",\n      \"voice_id\": \"PJXRwHpW7osOhD6GiW1M\"\n    },\n    {\n      \"type\": \"avatar_video\",\n      \"input\": {\n        \"type\": \"avatar\",\n        \"avatar_id\": \"cbc2c423747542eda390ffaeb269202c\",\n        \"script\": \"We'll continue to follow this story throughout the evening. I'm Daniel Mercer, thanks for watching.\",\n        \"voice_id\": \"PJXRwHpW7osOhD6GiW1M\",\n        \"background\": {\n          \"type\": \"color\",\n          \"color\": \"#0d1b2a\"\n        }\n      }\n    }\n  ],\n  \"title\": \"Option A - Studio API Cutaway Test\",\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "3-scene studio video: avatar intro -> narrated b-roll cutaway -> avatar sign-off."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "var id = ((json.data || {}).video_id) || ((json.data || {}).id) || json.video_id;",
+                  "if (id) { pm.collectionVariables.set('video_id', id); console.log('video_id set:', id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Migration - Engine Comparison (iii vs iv vs v)",
+      "description": "COSTS CREDITS - run deliberately. Same avatar (Daniel Mercer, full V3 access) and script rendered on all three engines for a direct quality/motion comparison. avatar_iii has no motion_prompt - expect noticeably less natural movement.",
+      "item": [
+        {
+          "name": "Engine comparison - avatar_iii",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/v3/videos",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"cbc2c423747542eda390ffaeb269202c\",\n  \"script\": \"Good evening. This is a side-by-side engine comparison test rendering the exact same script and avatar.\",\n  \"voice_id\": \"PJXRwHpW7osOhD6GiW1M\",\n  \"background\": {\n    \"type\": \"color\",\n    \"value\": \"#0d1b2a\"\n  },\n  \"engine\": {\n    \"type\": \"avatar_iii\"\n  },\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Engine Comparison - avatar_iii\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Same avatar (Daniel Mercer) and script rendered with avatar_iii - compare all three side by side for motion/lip-sync quality before deciding which engine to standardize on for the full-access roster tier."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "var id = ((json.data || {}).video_id) || ((json.data || {}).id) || json.video_id;",
+                  "if (id) { pm.collectionVariables.set('video_id', id); console.log('video_id set:', id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Engine comparison - avatar_iv",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/v3/videos",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"cbc2c423747542eda390ffaeb269202c\",\n  \"script\": \"Good evening. This is a side-by-side engine comparison test rendering the exact same script and avatar.\",\n  \"voice_id\": \"PJXRwHpW7osOhD6GiW1M\",\n  \"background\": {\n    \"type\": \"color\",\n    \"value\": \"#0d1b2a\"\n  },\n  \"engine\": {\n    \"type\": \"avatar_iv\"\n  },\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Engine Comparison - avatar_iv\",\n  \"motion_prompt\": \"Professional broadcast news anchor. Composed, confident posture. Subtle, deliberate hand gestures.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Same avatar (Daniel Mercer) and script rendered with avatar_iv - compare all three side by side for motion/lip-sync quality before deciding which engine to standardize on for the full-access roster tier."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "var id = ((json.data || {}).video_id) || ((json.data || {}).id) || json.video_id;",
+                  "if (id) { pm.collectionVariables.set('video_id', id); console.log('video_id set:', id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Engine comparison - avatar_v",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/v3/videos",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{HEYGEN_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"avatar\",\n  \"avatar_id\": \"cbc2c423747542eda390ffaeb269202c\",\n  \"script\": \"Good evening. This is a side-by-side engine comparison test rendering the exact same script and avatar.\",\n  \"voice_id\": \"PJXRwHpW7osOhD6GiW1M\",\n  \"background\": {\n    \"type\": \"color\",\n    \"value\": \"#0d1b2a\"\n  },\n  \"engine\": {\n    \"type\": \"avatar_v\"\n  },\n  \"resolution\": \"1080p\",\n  \"aspect_ratio\": \"16:9\",\n  \"title\": \"Engine Comparison - avatar_v\",\n  \"motion_prompt\": \"Professional broadcast news anchor. Composed, confident posture. Subtle, deliberate hand gestures.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Same avatar (Daniel Mercer) and script rendered with avatar_v - compare all three side by side for motion/lip-sync quality before deciding which engine to standardize on for the full-access roster tier."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "var id = ((json.data || {}).video_id) || ((json.data || {}).id) || json.video_id;",
+                  "if (id) { pm.collectionVariables.set('video_id', id); console.log('video_id set:', id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
         }
       ]
     }

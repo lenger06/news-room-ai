@@ -74,6 +74,10 @@ class Anchor:
 
 ANCHORS: list[Anchor] = [
 
+    # BACKUP ROSTER (2026-07-27): no longer assigned to any show as of the avatar_v
+    # rollout below — replaced by Erik Sinclair due to the avatar_iii Veo-watermark
+    # risk (HEYGEN_V3_MIGRATION_PLAN.md sec 4a/10). Left fully defined and available
+    # to reassign in config/shows.py at any time; not deleted.
     Anchor(
         name="Shawn Green",
         avatars=[
@@ -88,7 +92,18 @@ ANCHORS: list[Anchor] = [
         bio="Chief Foreign Correspondent. Measured and globally-informed. Covers international affairs and geopolitics.",
         voice_emotion="Broadcaster",
         talking_style="stable",
-    ),    
+    ),
+    Anchor(
+        name="Erik Sinclair",
+        avatars=[
+            AvatarLook("a84c67c98026494f93c8cde5b95374a5", "navy blazer, open collar, modern office backdrop — international affairs and geopolitics"),  # HeyGen: "Erik Office18 P1 5S6 A1" (avatar_v PAOS) — replaces Shawn Green 2026-07-27
+        ],
+        voice_id="e1a429dbe823406dbae5fa7c3612314d",  # reused from Shawn Green
+        desk="politics, national",
+        bio="Chief Foreign Correspondent. Measured and globally-informed. Covers international affairs and geopolitics.",
+        voice_emotion="Broadcaster",
+        talking_style="stable",
+    ),
     Anchor(
         name="Dominic Fairchild",
         avatars=[
@@ -220,6 +235,10 @@ ANCHORS: list[Anchor] = [
         talking_style="expressive",
         expression="happy",
     ),
+    # BACKUP ROSTER (2026-07-27): no longer assigned to any show as of the avatar_v
+    # rollout below — replaced by Lars Whitfield due to the avatar_iii Veo-watermark
+    # risk (HEYGEN_V3_MIGRATION_PLAN.md sec 4a/10). Left fully defined and available
+    # to reassign in config/shows.py at any time; not deleted.
     Anchor(
         name="Brandon Jones",
         avatars=[
@@ -227,6 +246,17 @@ ANCHORS: list[Anchor] = [
             # AvatarLook("<avatar_id>", "casual blazer — startup and tech business stories"),
         ],
         voice_id="3787b4ab93174952a3ad649209f1029a",
+        desk="business",
+        bio="Business & Finance Correspondent. Clear and data-driven. Covers markets, economy, and corporate news.",
+        voice_emotion="Serious",
+        talking_style="stable",
+    ),
+    Anchor(
+        name="Lars Whitfield",
+        avatars=[
+            AvatarLook("96acdfb607aa4b1095e8c21517cacd74", "gray sweater over collar, modern office backdrop — markets, earnings, economic news"),  # HeyGen: "Lars Office16 P1 A1" (avatar_v PAOS) — replaces Brandon Jones 2026-07-27
+        ],
+        voice_id="3787b4ab93174952a3ad649209f1029a",  # reused from Brandon Jones
         desk="business",
         bio="Business & Finance Correspondent. Clear and data-driven. Covers markets, economy, and corporate news.",
         voice_emotion="Serious",

@@ -77,6 +77,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# watchfiles (uvicorn --reload's file watcher) logs an INFO line for every raw
+# filesystem event it notices, including writes to this very log file — since
+# that "N change(s) detected" line goes through the same root-logger handlers
+# configured above, it gets written to the log file too, which watchfiles then
+# detects as another change, ad infinitum. reload_excludes (below) stops uvicorn
+# from *acting* on excluded-path changes but does not stop watchfiles from
+# *logging* them, so the loop has to be broken here instead.
+logging.getLogger("watchfiles").setLevel(logging.WARNING)
+
 
 # ── Event feed background poller ─────────────────────────────────────────────
 async def _event_feed_loop():
@@ -91,6 +100,7 @@ async def _event_feed_loop():
         try:
             await asyncio.sleep(settings.EVENT_FEED_POLL_SECONDS)
             candidates = await asyncio.to_thread(fetch_all)
+            logger.info(f"[event_feeds] Poll cycle complete: {len(candidates)} new candidate(s)")
             if not candidates:
                 continue
             checker = await agent_registry.get_agent("breaking_news_checker")

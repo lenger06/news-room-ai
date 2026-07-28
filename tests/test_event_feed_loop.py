@@ -92,3 +92,30 @@ async def test_event_feed_loop_survives_checker_exception_and_keeps_polling(monk
     # Reached the cancellation on the 3rd sleep call — proves the loop survived
     # two exception-raising iterations instead of crashing out on the first.
     assert call_state["n"] == 3
+
+
+async def test_event_feed_loop_logs_heartbeat_even_with_no_new_candidates(monkeypatch, caplog):
+    """
+    Regression guard: an empty poll cycle (the common case — most 30-minute
+    windows won't have a new earthquake/alert/RSS item) must still leave a
+    visible log line, otherwise there's no way to tell "polling fine, nothing
+    new" apart from "silently stopped working."
+    """
+    call_state = {"n": 0}
+
+    async def fake_sleep(seconds):
+        call_state["n"] += 1
+        if call_state["n"] > 1:
+            raise asyncio.CancelledError()
+
+    def fake_fetch_all():
+        return []
+
+    monkeypatch.setattr(main_module.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(event_feeds_module, "fetch_all", fake_fetch_all)
+
+    with caplog.at_level("INFO"):
+        with pytest.raises(asyncio.CancelledError):
+            await main_module._event_feed_loop()
+
+    assert any("Poll cycle complete: 0 new candidate(s)" in r.message for r in caplog.records)

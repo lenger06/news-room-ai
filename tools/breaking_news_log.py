@@ -85,3 +85,21 @@ def record(topic: str, headline: str, keywords: list[str], show_slug: str) -> No
     })
     _save(entries)
     logger.info(f"[breaking_news_log] Recorded: {headline[:80]}")
+
+
+def unrecord(headline: str) -> bool:
+    """
+    Remove the most recent entry matching headline — used when a production is
+    recorded (to prevent a same-story re-fire race) but then confirmed to have
+    never actually happened (submission failed, or the async job errored out).
+    Without this, a story that was never produced would stay falsely marked as
+    "covered" for the rest of the dedup window. Returns True if an entry was removed.
+    """
+    entries = _load()
+    for i in range(len(entries) - 1, -1, -1):
+        if entries[i].get("headline") == headline:
+            del entries[i]
+            _save(entries)
+            logger.info(f"[breaking_news_log] Un-recorded (production never completed): {headline[:80]}")
+            return True
+    return False

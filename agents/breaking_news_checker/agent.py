@@ -32,6 +32,10 @@ logger = logging.getLogger(__name__)
 _LAST_BROADCAST_PATH = Path("./output/last_broadcast.json")
 _ANCHOR_HANDOFF_MINUTES = 60   # use last show's anchor team if they aired within this window
 
+# Keeps strong references to fire-and-forget _check_job_outcome background tasks so
+# they aren't garbage-collected mid-sleep — discarded automatically once each finishes.
+_background_checks: set[asyncio.Task] = set()
+
 
 class Agent(BaseAgent):
     """Breaking News Checker — monitors headlines and triggers emergency productions."""
@@ -311,26 +315,61 @@ class Agent(BaseAgent):
         # Determine anchor team: last show's crew if aired recently, else dedicated BN team
         show_slug = self._determine_show_slug()
 
-        # Record BEFORE firing so a crash or re-check won't double-produce
+        # Record BEFORE firing so a crash or re-check won't double-produce. If submission
+        # ends up failing below, this gets undone (unrecord) so the story isn't left
+        # falsely marked "covered" for the rest of the dedup window.
         record(topic=topic, headline=headline, keywords=keywords, show_slug=show_slug)
 
-        # Start production via /produce/async so Jarvis can track and notify when done
+        # Start production via /produce/async so Jarvis can track and notify when done.
+        # One retry on a transient failure (timeout/connection reset) — /produce/async
+        # itself just spawns a background task and returns immediately, so a slow/failed
+        # response here means something was actually wrong (e.g. server under contention),
+        # not that the production itself is slow.
         logger.info(f"[breaking_news] Starting production: show={show_slug} | {topic}")
         production_job_id = ""
-        try:
-            import requests as _req
-            resp = _req.post(
-                "http://localhost:8091/produce/async",
-                json={"request": prod_message, "show_slug": show_slug},
-                timeout=15,
+        submission_error = None
+        for attempt in range(2):
+            try:
+                import requests as _req
+                resp = await asyncio.to_thread(
+                    _req.post,
+                    "http://localhost:8091/produce/async",
+                    json={"request": prod_message, "show_slug": show_slug},
+                    timeout=30,
+                )
+                if resp.ok:
+                    production_job_id = resp.json().get("job_id", "")
+                    logger.info(f"[breaking_news] Production job started: {production_job_id}")
+                    submission_error = None
+                    break
+                submission_error = f"HTTP {resp.status_code}"
+                logger.error(f"[breaking_news] /produce/async returned {resp.status_code} (attempt {attempt + 1}/2)")
+            except Exception as e:
+                submission_error = str(e)
+                logger.error(f"[breaking_news] Failed to start production (attempt {attempt + 1}/2): {e}", exc_info=True)
+            if attempt == 0:
+                await asyncio.sleep(5)
+
+        if not production_job_id:
+            # Never actually produced — undo the dedup record and surface it for review
+            # instead of a log line nobody's watching in real time.
+            from tools.breaking_news_log import unrecord
+            from tools.review_queue import record as review_record
+            unrecord(headline)
+            review_record(
+                topic=topic,
+                reason=f"Breaking news detected but production failed to start after retry: {submission_error}",
+                stage="breaking_news_submission",
+                output_dir="",
+                workflow="breaking_news",
             )
-            if resp.ok:
-                production_job_id = resp.json().get("job_id", "")
-                logger.info(f"[breaking_news] Production job started: {production_job_id}")
-            else:
-                logger.error(f"[breaking_news] /produce/async returned {resp.status_code}")
-        except Exception as e:
-            logger.error(f"[breaking_news] Failed to start production: {e}", exc_info=True)
+        else:
+            # Fire-and-forget safety net: a job that stalls or errors out downstream
+            # (past the initial submission) otherwise leaves no signal at all — checked
+            # once after a generous bounded wait, not polled continuously.
+            task = asyncio.create_task(self._check_job_outcome(production_job_id, topic, headline))
+            _background_checks.add(task)
+            task.add_done_callback(_background_checks.discard)
 
         response_text = (
             f"Breaking news detected — production started.\n"
@@ -341,6 +380,14 @@ class Agent(BaseAgent):
         )
         if production_job_id:
             response_text += f"\nPRODUCTION_JOB_ID: {production_job_id}"
+        else:
+            response_text = (
+                f"Breaking news detected but production FAILED to start: {submission_error}\n"
+                f"Story: {headline}\n"
+                f"Confidence: {confidence}\n"
+                f"Reason: {reason}\n"
+                f"Flagged for human review."
+            )
 
         return {
             "success": True,
@@ -351,4 +398,57 @@ class Agent(BaseAgent):
             "topic": topic,
             "headline": headline,
             "show_slug": show_slug,
+            "production_started": bool(production_job_id),
         }
+
+    async def _check_job_outcome(
+        self, job_id: str, topic: str, headline: str, wait_seconds: int = 2700,
+    ) -> None:
+        """
+        Bounded background safety net for a job that was submitted successfully but
+        never surfaces any further signal — main.py's job tracking is in-memory only
+        (GET /job/{job_id}) and nothing proactively checks it. Waits generously longer
+        than any real production observed so far (~30 min for the slowest) before
+        checking once, to minimize false "stalled" flags on jobs still legitimately running.
+        """
+        await asyncio.sleep(wait_seconds)
+        try:
+            import requests as _req
+            resp = await asyncio.to_thread(
+                _req.get, f"http://localhost:8091/job/{job_id}", timeout=15,
+            )
+            if not resp.ok:
+                return
+            data = resp.json()
+            status = data.get("status")
+        except Exception as e:
+            logger.warning(f"[breaking_news] Could not check job {job_id} outcome: {e}")
+            return
+
+        if status == "complete":
+            return
+
+        from tools.review_queue import record as review_record
+        if status == "error":
+            logger.warning(f"[breaking_news] Job {job_id} for '{topic}' ended in error — flagging for review")
+            review_record(
+                topic=topic,
+                reason=f"Production job {job_id} failed: {data.get('error', 'unknown error')}",
+                stage="breaking_news_job_error",
+                output_dir="",
+                workflow="breaking_news",
+            )
+            from tools.breaking_news_log import unrecord
+            unrecord(headline)
+        else:
+            logger.warning(
+                f"[breaking_news] Job {job_id} for '{topic}' still {status!r} "
+                f"after {wait_seconds // 60} min — flagging for review"
+            )
+            review_record(
+                topic=topic,
+                reason=f"Production job {job_id} still {status!r} after {wait_seconds // 60} minutes — check manually",
+                stage="breaking_news_job_stalled",
+                output_dir="",
+                workflow="breaking_news",
+            )

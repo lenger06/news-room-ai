@@ -6,6 +6,8 @@ Designed to run as a standalone backend service called by [Jarvis](https://githu
 
 See [`SELF_IMPROVEMENT_ROADMAP.md`](SELF_IMPROVEMENT_ROADMAP.md) for the in-progress plan toward a more autonomous, self-improving newsroom — what's landed, what's next, and why.
 
+See [`HEYGEN_V3_MIGRATION_PLAN.md`](HEYGEN_V3_MIGRATION_PLAN.md) for the HeyGen V2→V3 migration — every show now renders anchor video via `pip_v3_chromakey` (a V3 greenscreen avatar composited locally onto the same studio background/PiP pipeline `pip_v2` used), including the one known open risk (an intermittent watermark on the `avatar_iii` engine tier) and how the roster is split around it.
+
 ---
 
 ## Example Prompts
@@ -79,11 +81,13 @@ Video from script, use Alexa Chen: [paste script]
 ### Requesting a Specific Anchor
 
 ```
-Produce a broadcast video on the Iran war — have Shawn Green read it
+Produce a broadcast video on the Iran war — have Erik Sinclair read it
 Generate a news video with Darlene Smith anchoring
 Alexa Chen should read the entertainment roundup
 Have Daniel Mercer anchor the White House briefing video
 ```
+
+> An explicit request also works for a backup-roster anchor (e.g. `have Shawn Green read it`) — they're unassigned from shows, not deleted, and still resolve by name.
 
 > If no anchor is specified, the Executive Producer selects the anchor assigned to the active show and desk.
 
@@ -119,36 +123,42 @@ Anchors are defined in `config/anchors.py`. Each anchor has an on-air name, one 
 
 The Executive Producer selects the anchor assigned to the active show and desk, then rotates through that anchor's looks round-robin on each production. A `look_preference` (e.g. "formal", "casual") filters the rotation pool to matching looks. Shows can also configure a stand-in anchor that rotates in every N productions (`alt_anchor_name` / `alt_every`).
 
-**Current roster:**
+**Current roster** — every show now runs `video_style = "pip_v3_chromakey"` (see [`HEYGEN_V3_MIGRATION_PLAN.md`](HEYGEN_V3_MIGRATION_PLAN.md)), so the "Engine" column reflects which HeyGen V3 engine each anchor's avatar resolves to, not a `pip_v2`/`pip_v3` choice:
 
-| On-air name | HeyGen actor | Desks | Engine |
-|---|---|---|---|
-| Shawn Green | Shawn (3 looks) | Politics, National, Foreign, Special Reports | v2 |
-| Daniel Mercer | Daniel Mercer | National, Politics, Foreign (Morning Report lead) | v2 |
-| Nicholas Stavros | Kurt | National (Evening News lead) | v2 |
-| Dominic Fairchild | Man in the Sport Coat | Politics, National | v2 |
-| Alexa Chen | Alexa | Entertainment | v2 |
-| Monica Hayes | Saskia (3 looks) | Entertainment | v2 |
-| Valerie Brooks | Candace (2 looks) | Entertainment | v2 |
-| Zayne Carter | Zayne (2 looks) | Entertainment | v2 |
-| Karoline Faye | Brooklyn (2 looks) | Entertainment | v2 |
-| Victor Marinos | Ricardo (3 looks) | Politics | v2 |
-| Brandon Jones | Brandon in Grey Suit | Business | v2 |
-| Alister Blackwood | Dexter Suit Front | Investigative | v2 |
-| Darlene Smith | Crystal Veil | Health & Science | v2 |
-| **Marco Reyes** | PAOS (3 looks) | National | **Avatar V only** |
-| **Elise Navarro** | PAOS | National | **Avatar V only** |
-| **Elena Vasquez** | PAOS | National | **Avatar V only** |
+| On-air name | HeyGen actor | Desks | Status | Engine |
+|---|---|---|---|---|
+| Erik Sinclair | Erik (PAOS) | Politics, National, Foreign, Special Reports | Active | `avatar_v` |
+| Lars Whitfield | Lars (PAOS) | Business | Active | `avatar_v` |
+| Daniel Mercer | Daniel Mercer | National, Politics, Foreign (Morning Report lead) | Active | **unsupported — auto-falls back to `pip_v2`** |
+| Nicholas Stavros | Kurt | National (Evening News lead) | Active | `avatar_v` |
+| Dominic Fairchild | Man in the Sport Coat | Politics, National | Active | `avatar_v` |
+| Alexa Chen | Alexa | Entertainment | Active | `avatar_v` |
+| Monica Hayes | Saskia (3 looks) | Entertainment | Active | `avatar_iii` — watermark risk |
+| Valerie Brooks | Candace (2 looks) | Entertainment | Active | `avatar_iii` — watermark risk |
+| Alister Blackwood | Dexter Suit Front | Investigative | Active | `avatar_iii` — watermark risk |
+| Darlene Smith | Crystal Veil | Health & Science | Active | `avatar_iv` ✓ validated |
+| Zayne Carter | Zayne (2 looks) | Entertainment | Backup/unassigned | `avatar_v` ✓ validated |
+| Karoline Faye | Brooklyn (2 looks) | Entertainment | Backup/unassigned | `avatar_v` |
+| **Shawn Green** | Shawn (3 looks) | Politics, National, Foreign, Special Reports | **Backup roster — replaced by Erik Sinclair** | `avatar_iii` — watermark risk |
+| **Brandon Jones** | Brandon in Grey Suit | Business | **Backup roster — replaced by Lars Whitfield** | `avatar_iii` — watermark risk |
+| Marco Reyes | PAOS (3 looks) | National | `avatar_v_only` | `avatar_v` |
+| Elise Navarro | PAOS | National | `avatar_v_only` | `avatar_v` |
+| Elena Vasquez | PAOS | National | `avatar_v_only` | `avatar_v` |
 
-### Avatar V Anchors (`avatar_v_only`)
+"✓ validated" means a real chromakey render for that specific avatar has been visually reviewed end-to-end (studio background, no watermark, clean key) — everyone else on `avatar_v`/`avatar_iv` shares the same code path but hasn't been individually spot-checked yet. `avatar_iii` anchors carry a known, *intermittent* (not deterministic) risk of a visible watermark on the rendered video — see the migration plan for details; there's no automated detection yet, so review published video from that tier manually.
 
-Marco Reyes, Elise Navarro, and Elena Vasquez are **PAOS** (Public Avatar On-Screen) avatars that require HeyGen's **Avatar V** engine and the **v3 API**. They are flagged `avatar_v_only=True` in `config/anchors.py`, which means:
+### Backup Roster
 
-- They are **excluded from all automatic desk and random anchor lookups** — they cannot be accidentally assigned to a standard `pip_v2` production
+`config/anchors.py` never deletes an anchor when it's replaced — Shawn Green and Brandon Jones are still fully defined and resolvable by name (`get_anchor(name="Shawn Green")`), just unassigned from every show's `desk_anchors`. Reassigning one is a one-line edit to `config/shows.py`; no roster or code changes needed. This is also why an explicit anchor request (`have Shawn Green anchor this`) still works even though he's not on the active schedule — see the callout in `agents/executive_producer/prompts.py` about not inferring an anchor from examples or unstated context.
+
+### `avatar_v_only` Anchors
+
+Marco Reyes, Elise Navarro, and Elena Vasquez are **PAOS** avatars reserved for **`fullscreen_v3`** (full-screen, single-scene V3 avatar API, not the chromakey pipeline). They are flagged `avatar_v_only=True` in `config/anchors.py`, which means:
+
+- They are **excluded from all automatic desk and random anchor lookups** — they cannot be accidentally assigned to a standard production
 - They are only used when **explicitly named** in a request (e.g. `have Elise Navarro anchor this`) or when a show is configured with `video_style = "fullscreen_v3"`
-- Their look IDs are **incompatible with the v2 API** — only use them with `[SHOW: ...]` + `fullscreen_v3` style or direct v3 API calls
 
-To produce a full-screen Avatar V broadcast, set `video_style = "fullscreen_v3"` on the show in `config/shows.py` or pass `[VIDEO-STYLE:fullscreen_v3]` in the request.
+To produce a full-screen Avatar V broadcast, set `video_style = "fullscreen_v3"` on the show in `config/shows.py` or pass `[VIDEO-STYLE:fullscreen_v3]` in the request. To use the (now-default) chromakey pipeline instead, don't set `video_style` at all, or set it to `"pip_v3_chromakey"` explicitly.
 
 To add an anchor, add an entry to the `ANCHORS` list in `config/anchors.py`. Each look is an `AvatarLook(avatar_id, description)` — HeyGen names are noted in comments next to each ID:
 
@@ -201,11 +211,11 @@ Criteria are defined in `agents/breaking_news_checker/prompts.py`. The coverage 
 
 It's evaluated by the same LLM qualifying-criteria judgment and same-story dedup/cooldown gates as the headline-scan path (`breaking_news_checker.process_webhook_event()`), then fires a production the same way if it clears the bar.
 
-**Built-in event feed pollers** (`tools/event_feeds.py`) cover three sources: the USGS significant-earthquakes feed and active NWS/weather.gov CAP alerts (both need no API key or account at all), plus a configurable RSS/Atom poller. The RSS poller exists because the real wire services (AP, Reuters, Bloomberg, Dataminr) are either pull-only or enterprise-priced with no self-serve push access — pointing this at outlets' public "breaking news" category feeds (many of which syndicate AP wire content) is the practical alternative. Each candidate, from any of the three sources, is deduplicated against a seen-event cache (`./output/event_feed_seen.json`, 72-hour TTL) so a still-active earthquake, alert, or RSS item isn't re-submitted every poll. **Disabled by default** — a qualifying event firing a real, credit-spending, publish-to-YouTube production with no human in the loop is a genuinely new capability, not something to turn on silently. Enable it in `.env`:
+**Built-in event feed pollers** (`tools/event_feeds.py`) cover three sources: the USGS significant-earthquakes feed and active NWS/weather.gov CAP alerts (both need no API key or account at all), plus a configurable RSS/Atom poller. The RSS poller exists because the real wire services (AP, Reuters, Bloomberg, Dataminr) are either pull-only or enterprise-priced with no self-serve push access — pointing this at outlets' public "breaking news" category feeds (many of which syndicate AP wire content) is the practical alternative. Each candidate, from any of the three sources, is deduplicated against a seen-event cache (`./output/event_feed_seen.json`, 72-hour TTL) so a still-active earthquake, alert, or RSS item isn't re-submitted every poll. **Disabled by default in a fresh clone** — a qualifying event firing a real, credit-spending, publish-to-YouTube production with no human in the loop is a genuinely new capability, not something to turn on silently — but proven out in real operation: with it enabled, the poller has correctly identified and autonomously published multiple genuine breaking-news videos with no human triggering them. Enable it in `.env`:
 
 ```env
 EVENT_FEEDS_ENABLED=true
-EVENT_FEED_POLL_SECONDS=300
+EVENT_FEED_POLL_SECONDS=1800
 EVENT_FEED_MIN_MAGNITUDE=6.0
 EVENT_FEED_NWS_SEVERITIES=Extreme,Severe
 EVENT_FEED_USER_AGENT="news-room-ai (contact: you@example.com)"   # required by weather.gov's usage policy
@@ -213,7 +223,7 @@ EVENT_FEED_RSS_URLS=""    # comma-separated feed URLs — empty = RSS polling st
 EVENT_FEED_RSS_MAX_ITEMS_PER_FEED=10
 ```
 
-When enabled, a background `asyncio` task inside this process (started in `main.py`'s lifespan, not a separate scheduler) polls every configured feed and calls `process_webhook_event()` directly in-process for each new candidate — every RSS item still has to clear the same strict qualifying-criteria LLM gate as an earthquake or weather alert, so pointing `EVENT_FEED_RSS_URLS` at a high-volume general-news feed just means a lot of wasted evaluation calls, not a lot of extra breaking news. Market-data streams and X/Twitter's filtered stream still need a paid/authenticated source that isn't configured here — see `SELF_IMPROVEMENT_ROADMAP.md` Phase 5 if you want to add one; they'd plug into the same gating either way.
+When enabled, a background `asyncio` task inside this process (started in `main.py`'s lifespan, not a separate scheduler) polls every configured feed and calls `process_webhook_event()` directly in-process for each new candidate — every RSS item still has to clear the same strict qualifying-criteria LLM gate as an earthquake or weather alert, so pointing `EVENT_FEED_RSS_URLS` at a high-volume general-news feed just means a lot of wasted evaluation calls, not a lot of extra breaking news. Every poll cycle logs `[event_feeds] Poll cycle complete: N new candidate(s)` — including when N is 0 — so a gap longer than the configured interval is a reliable signal something actually broke, not just a quiet news cycle. Market-data streams and X/Twitter's filtered stream still need a paid/authenticated source that isn't configured here — see `SELF_IMPROVEMENT_ROADMAP.md` Phase 5 if you want to add one; they'd plug into the same gating either way.
 
 ### Story Deduplication (EP Dedup Gate)
 
@@ -320,7 +330,12 @@ Reads `video_package.json` and uploads the finished MP4 to YouTube. The title is
 
 ## Human Review Queue
 
-When either the fact-check retry loop or the Compliance Checker halts a production, it's logged to `./output/needs_review.json` (`tools/review_queue.py`) instead of silently failing or publishing anyway — a flat, append-only log in the same style as `story_history.json` and `breaking_news_log.json`, capped at 200 entries. Each entry records the topic, the reason, which stage halted it (`fact_check` or `compliance`), the run's output directory (so you can read the full article/script/fact-check report), and the workflow.
+When either the fact-check retry loop or the Compliance Checker halts a production, it's logged to `./output/needs_review.json` (`tools/review_queue.py`) instead of silently failing or publishing anyway — a flat, append-only log in the same style as `story_history.json` and `breaking_news_log.json`, capped at 200 entries. Each entry records the topic, the reason, which stage halted it, the run's output directory (so you can read the full article/script/fact-check report), and the workflow.
+
+The Breaking News Checker also uses this queue as a safety net around `/produce/async`, since that call is fire-and-forget from its side:
+- `breaking_news_submission` — the call to start the job itself failed even after one retry (the endpoint just spawns a background task and returns immediately, so a slow/failed response means something was actually wrong, not that production is slow). The story is also un-recorded from the breaking-news dedup log so it isn't left falsely marked "covered" when nothing was produced.
+- `breaking_news_job_error` — the job started but the pipeline itself errored out downstream; also un-recorded, since it's confirmed nothing was published.
+- `breaking_news_job_stalled` — a bounded background check (~45 minutes after firing, comfortably past the slowest production observed) finds the job still running; flagged for review but *not* un-recorded, since it might still finish normally and a duplicate fire would be worse than a late one.
 
 A halted run is also reported back as `"success": false` from the Executive Producer, and `/produce/async` marks the job `status: "error"` accordingly — so a caller (Jarvis) polling `/job/{job_id}` can tell a halt apart from a normal completion, rather than seeing a silent "complete" with no video.
 
@@ -452,27 +467,28 @@ pip install -r requirements.txt
    - Call `GET https://api.heygen.com/v2/avatars` with your API key to list available avatars
    - Call `GET https://api.heygen.com/v2/voices` to list voices
 
-#### V3 API & Avatar V
+#### HeyGen API Versions — `video_style`
 
-The newsroom uses two HeyGen API versions in parallel:
+The newsroom uses three HeyGen API paths, selected per-show via `video_style` in `config/shows.py` (see full details and the live-testing findings in [`HEYGEN_V3_MIGRATION_PLAN.md`](HEYGEN_V3_MIGRATION_PLAN.md)):
 
-| | V2 (`/v2/video/generate`) | V3 (`/v3/videos`) |
-|---|---|---|
-| Used by | `pip_v2` shows (standard) | `fullscreen_v3` shows |
-| Background | `type: "video"` looping asset | `type: "color"` or `type: "image"` (no video) |
-| Caption | `"caption": true` (boolean) | Not supported — omit |
-| Engine | Default | `{"type": "avatar_v"}` for PAOS avatars |
-| `voice_settings.emotion` | Supported | Not supported — omit |
-| `remove_background` | Supported | Not supported for PAOS — causes render failure |
+| | `pip_v2` (`/v2/video/generate`) | `pip_v3_chromakey` (`/v3/videos` + local FFmpeg) | `fullscreen_v3` (`/v3/videos`) |
+|---|---|---|---|
+| Used by | Legacy fallback — no show uses this by default anymore | **Every show, by default** | `avatar_v_only` PAOS anchors, when explicitly requested |
+| Background | `type: "video"` looping asset, server-side composite | Solid chromakey color rendered by V3, composited locally with FFmpeg onto the *same* studio background/PiP video `pip_v2` uses | `type: "color"` or `type: "image"` only (no video) |
+| Multi-scene / per-segment backgrounds | Yes | No — one continuous take, first b-roll item found is used as a looping PiP inset | No — single scene |
+| `remove_background` | N/A | **Required** for `avatar_v`/`avatar_iv` engines (silently ignores the requested background color without it) — **rejected with HTTP 400** for `avatar_iii` (must be omitted) | Not supported |
+| Caption | `"caption": true` (boolean) | N/A (chromakey composite has no HeyGen caption pass) | Not supported — omit |
+| `voice_settings.emotion` | Supported | N/A | Not supported — omit |
+
+`pip_v3_chromakey`'s per-avatar behavior (`remove_background`, `motion_prompt`, `fit`, chromakey key color) is driven entirely by capability fields on each `AvatarLook` in `config/anchors.py` (`v3_engine`, `v3_supports_remove_background`, `v3_supports_motion_prompt`, `v3_fit`, `v3_key_color`, `v3_unsupported`) — not hardcoded per-request. An avatar flagged `v3_unsupported` (currently only Daniel Mercer, whose renders never honor a background color under V3 on any engine) automatically falls back to `pip_v2` for that render instead of failing.
 
 Key V3 rules learned from production:
 - **Background must be `"color"` or `"image"`** — `"video"` returns HTTP 400
 - **Background image must be uploaded** via `POST https://upload.heygen.com/v1/asset` — use the returned `asset_id`
-- **No `emotion` in voice_settings** — omit the field entirely; including it causes render failure
-- **No `remove_background`** — PAOS avatars don't support matting; field causes render failure
+- The upload response already contains a public `url` for the asset directly — a follow-up `GET /v1/asset/{id}` on `api.heygen.com` 404s for assets uploaded via `upload.heygen.com`, don't round-trip through it
 - **No `caption`** — not supported in v3; omit entirely
 
-A Postman collection covering all v3 endpoints, known-good payloads for each PAOS anchor, and documented failure cases is included at `HeyGen_V3.postman_collection.json`. Import it and set the `HEYGEN_API_KEY` collection variable to test.
+A Postman collection covering all v3 endpoints, known-good payloads for each PAOS anchor, and documented failure cases is included at `HeyGen_V3.postman_collection.json`. A smaller, standalone collection isolating just the background-color/chromakey question is at `HeyGen_Background_Color_Test.postman_collection.json`. Import either and set the `HEYGEN_API_KEY` collection variable to test.
 
 ### YouTube Setup
 
@@ -527,7 +543,7 @@ YOUTUBE_CLIENT_SECRETS_PATH=credentials/youtube_client_secrets.json
 
 # Event feeds — disabled by default, see "Event webhooks" above before enabling
 EVENT_FEEDS_ENABLED=False
-EVENT_FEED_POLL_SECONDS=300
+EVENT_FEED_POLL_SECONDS=1800
 EVENT_FEED_MIN_MAGNITUDE=6.0
 EVENT_FEED_NWS_SEVERITIES=Extreme,Severe
 EVENT_FEED_USER_AGENT="news-room-ai (contact: you@example.com)"
@@ -568,6 +584,10 @@ Server starts at `http://0.0.0.0:8091`.
 ### Logging
 
 `main.py` writes to `logs/newsroom_YYYY-MM-DD.log` — a fresh dated file each day (or on any restart that crosses into a new day), size-capped within that day via `concurrent_log_handler.ConcurrentRotatingFileHandler` (`LOG_MAX_BYTES`, default 25MB), with gzip'd numbered backups (`LOG_BACKUP_COUNT`, default 10) and old dated files pruned after `LOG_RETENTION_DAYS` (default 30) — a log4j-style combined size+time rolling policy. `ConcurrentRotatingFileHandler` specifically (not stdlib's `RotatingFileHandler`) because uvicorn's `--reload` briefly runs two processes across a restart, and plain rotating handlers aren't safe when more than one process can write/rotate the same file concurrently.
+
+The `watchfiles` logger (uvicorn `--reload`'s file watcher) is set to `WARNING` in `main.py` — left at its default `INFO`, it logs a line for every raw filesystem event it notices, including writes to the log file itself, which is a self-referential loop (write → detected → logged → that log line is itself a write → detected again) that can silently bloat the log file with nothing but "1 change detected" lines. `main.py`'s `reload_excludes` (`cache/`, `output/`, `logs/`, `assets/`, `credentials/`, `__pycache__/`, `.pytest_cache/`, `tests/`) stops uvicorn from *acting* on changes in those paths but does not stop `watchfiles` from *logging* them, so this has to be handled separately at the logger level.
+
+> **A restart-on-save footgun to know about:** on Windows, if a stale `main.py` process is still holding port 8091 when uvicorn's `--reload` spawns a new one after a file save, the new process can silently fail to bind the port while the old one keeps serving — every subsequent edit will look like it reloaded (the "Newsroom AI ready" banner logs fine) but requests keep hitting the old code. If behavior doesn't match a change you just made, check `netstat -ano | findstr :8091` and confirm only one `python.exe main.py` process is running before assuming the bug is in your code.
 
 ---
 
