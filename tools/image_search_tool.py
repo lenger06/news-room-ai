@@ -8,23 +8,12 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 
 
-@tool
-def image_search_tool(
-    query: str,
-    num_results: Optional[int] = 3,
-) -> str:
-    """
-    Search for images relevant to a news topic.
-
-    Args:
-        query: What to search for (e.g. "hurricane Milton satellite image")
-        num_results: Number of images to return (default 3)
-
-    Returns:
-        JSON string with image URLs, captions, and thumbnails
-    """
+def _image_search_impl(query: str, num_results: Optional[int] = 3) -> dict:
+    """Plain-Python core of image_search_tool (not an LLM tool) — called directly by
+    agents/researcher/agent.py's deterministic b-roll backstop, as well as by the
+    @tool-wrapped version below."""
     if not settings.TAVILY_API_KEY:
-        return json.dumps({"error": "TAVILY_API_KEY not configured", "images": []})
+        return {"error": "TAVILY_API_KEY not configured", "images": []}
 
     try:
         payload = {
@@ -39,7 +28,7 @@ def image_search_tool(
         response = requests.post("https://api.tavily.com/search", json=payload, timeout=15)
 
         if not response.ok:
-            return json.dumps({"error": f"HTTP {response.status_code}", "images": []})
+            return {"error": f"HTTP {response.status_code}", "images": []}
 
         data = response.json()
         raw_images = data.get("images", [])
@@ -70,8 +59,26 @@ def image_search_tool(
             else:
                 images.append({"url": url, "caption": query, "thumbnail": url})
         logger.info(f"[image_search_tool] {len(images)} images for: {query}")
-        return json.dumps({"images": images, "query": query})
+        return {"images": images, "query": query}
 
     except Exception as e:
         logger.error(f"[image_search_tool] Error: {e}", exc_info=True)
-        return json.dumps({"error": str(e), "images": []})
+        return {"error": str(e), "images": []}
+
+
+@tool
+def image_search_tool(
+    query: str,
+    num_results: Optional[int] = 3,
+) -> str:
+    """
+    Search for images relevant to a news topic.
+
+    Args:
+        query: What to search for (e.g. "hurricane Milton satellite image")
+        num_results: Number of images to return (default 3)
+
+    Returns:
+        JSON string with image URLs, captions, and thumbnails
+    """
+    return json.dumps(_image_search_impl(query, num_results))

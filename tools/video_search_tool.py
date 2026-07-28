@@ -28,23 +28,12 @@ def _pick_resolution(video_hit: dict) -> dict | None:
     return None
 
 
-@tool
-def video_search_tool(
-    query: str,
-    num_results: Optional[int] = 3,
-) -> str:
-    """
-    Search for short royalty-free video clips relevant to a news topic (for use as b-roll footage).
-
-    Args:
-        query: What to search for (e.g. "cargo ships strait of hormuz", "senate chamber vote")
-        num_results: Number of video clips to return (default 3)
-
-    Returns:
-        JSON string with direct video file URLs, descriptions, and durations
-    """
+def _video_search_impl(query: str, num_results: Optional[int] = 3) -> dict:
+    """Plain-Python core of video_search_tool (not an LLM tool) — called directly by
+    agents/researcher/agent.py's deterministic b-roll backstop, as well as by the
+    @tool-wrapped version below."""
     if not settings.PIXABAY_API_KEY:
-        return json.dumps({"error": "PIXABAY_API_KEY not configured", "videos": []})
+        return {"error": "PIXABAY_API_KEY not configured", "videos": []}
 
     try:
         response = requests.get(
@@ -60,7 +49,7 @@ def video_search_tool(
         )
         if not response.ok:
             logger.warning(f"[video_search_tool] Pixabay HTTP {response.status_code}: {response.text[:200]}")
-            return json.dumps({"error": f"HTTP {response.status_code}", "videos": []})
+            return {"error": f"HTTP {response.status_code}", "videos": []}
 
         data = response.json()
         videos = []
@@ -82,8 +71,26 @@ def video_search_tool(
                 break
 
         logger.info(f"[video_search_tool] {len(videos)} clips for: {query!r}")
-        return json.dumps({"videos": videos, "query": query})
+        return {"videos": videos, "query": query}
 
     except Exception as e:
         logger.error(f"[video_search_tool] Error: {e}", exc_info=True)
-        return json.dumps({"error": str(e), "videos": []})
+        return {"error": str(e), "videos": []}
+
+
+@tool
+def video_search_tool(
+    query: str,
+    num_results: Optional[int] = 3,
+) -> str:
+    """
+    Search for short royalty-free video clips relevant to a news topic (for use as b-roll footage).
+
+    Args:
+        query: What to search for (e.g. "cargo ships strait of hormuz", "senate chamber vote")
+        num_results: Number of video clips to return (default 3)
+
+    Returns:
+        JSON string with direct video file URLs, descriptions, and durations
+    """
+    return json.dumps(_video_search_impl(query, num_results))
