@@ -88,6 +88,7 @@ _BROLL_COMPOSITE_CACHE      = _CACHE_DIR / "broll_composites"
 _BROLL_VIDEO_DOWNLOAD_CACHE = _CACHE_DIR / "broll_video_downloads"
 _ENHANCED_BG_CACHE          = _CACHE_DIR / "enhanced_backgrounds"
 _COMPOSITE_DURATION_S       = 15     # seconds; HeyGen loops via play_style:loop
+_BROLL_MIN_HOLD_SECONDS     = 5.0    # minimum time a b-roll item stays on screen before switching
 
 
 def _load_bg_frame() -> bytes | None:
@@ -580,12 +581,38 @@ def _get_ffmpeg_exe() -> str | None:
     return None
 
 
+def _get_clip_duration_seconds(video_bytes: bytes) -> float | None:
+    """Read a video clip's duration from ffmpeg's stderr banner (same approach as
+    tools/video_tools.py's _get_video_duration_seconds, duplicated here rather than
+    imported to keep this module's ffmpeg helpers self-contained). Operates on raw
+    bytes since callers here have in-memory clips, not files on disk."""
+    ffmpeg = _get_ffmpeg_exe()
+    if not ffmpeg or not video_bytes:
+        return None
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "clip.mp4"
+            path.write_bytes(video_bytes)
+            result = subprocess.run([ffmpeg, "-i", str(path)], capture_output=True, timeout=30)
+            stderr = result.stderr.decode(errors="replace")
+            m = _re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", stderr)
+            if not m:
+                return None
+            h, mn, s = m.groups()
+            return int(h) * 3600 + int(mn) * 60 + float(s)
+    except Exception as e:
+        logger.warning(f"[heygen] _get_clip_duration_seconds error: {e}")
+        return None
+
+
 def _create_broll_video_composite(
-    broll_image_bytes: bytes, bg_video_bytes: bytes, pip_position: str = "left"
+    broll_image_bytes: bytes, bg_video_bytes: bytes, pip_position: str = "left",
+    duration_s: float = _COMPOSITE_DURATION_S,
 ) -> bytes | None:
     """
     FFmpeg: overlay the b-roll image as a PiP in the upper corner of the background video.
-    Produces a {_COMPOSITE_DURATION_S}s MP4 (HeyGen will loop it).
+    Produces a {duration_s}s MP4 (HeyGen will loop it for the default-duration case; the
+    timed multi-window chromakey background builder passes an exact per-window duration).
     Returns MP4 bytes, or None on failure.
     """
     ffmpeg = _get_ffmpeg_exe()
@@ -611,7 +638,7 @@ def _create_broll_video_composite(
                 "-filter_complex",
                 f"[1:v]scale={_PIP_W}:{_PIP_H}:force_original_aspect_ratio=decrease[pip];"
                 f"[0:v][pip]overlay={overlay_x}:{_PIP_PADDING}",
-                "-t", str(_COMPOSITE_DURATION_S),
+                "-t", str(duration_s),
                 "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                 "-pix_fmt", "yuv420p",
                 "-movflags", "+faststart",
@@ -628,7 +655,7 @@ def _create_broll_video_composite(
             video_bytes = out_path.read_bytes()
             logger.info(
                 f"[heygen] FFmpeg PiP composite ({pip_position}): "
-                f"{_COMPOSITE_DURATION_S}s MP4 ({len(video_bytes):,} bytes)"
+                f"{duration_s}s MP4 ({len(video_bytes):,} bytes)"
             )
             return video_bytes
     except Exception as e:
@@ -710,12 +737,14 @@ def _download_broll_video(video_url: str) -> bytes | None:
 
 
 def _create_broll_video_composite_from_video(
-    broll_video_bytes: bytes, bg_video_bytes: bytes, pip_position: str = "left"
+    broll_video_bytes: bytes, bg_video_bytes: bytes, pip_position: str = "left",
+    duration_s: float = _COMPOSITE_DURATION_S,
 ) -> bytes | None:
     """
     FFmpeg: overlay a looping b-roll video clip as a PiP in the upper corner of the background video.
-    Produces a {_COMPOSITE_DURATION_S}s MP4 (HeyGen will loop it). Audio is stripped.
-    Returns MP4 bytes, or None on failure.
+    Produces a {duration_s}s MP4 (HeyGen will loop it for the default-duration case; the
+    timed multi-window chromakey background builder passes an exact per-window duration).
+    Audio is stripped. Returns MP4 bytes, or None on failure.
     """
     ffmpeg = _get_ffmpeg_exe()
     if not ffmpeg:
@@ -740,7 +769,7 @@ def _create_broll_video_composite_from_video(
                 "-filter_complex",
                 f"[1:v]scale={_PIP_W}:{_PIP_H}:force_original_aspect_ratio=decrease[pip];"
                 f"[0:v][pip]overlay={overlay_x}:{_PIP_PADDING}",
-                "-t", str(_COMPOSITE_DURATION_S),
+                "-t", str(duration_s),
                 "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                 "-pix_fmt", "yuv420p",
                 "-movflags", "+faststart",
@@ -757,11 +786,44 @@ def _create_broll_video_composite_from_video(
             video_bytes = out_path.read_bytes()
             logger.info(
                 f"[heygen] FFmpeg video PiP composite ({pip_position}): "
-                f"{_COMPOSITE_DURATION_S}s MP4 ({len(video_bytes):,} bytes)"
+                f"{duration_s}s MP4 ({len(video_bytes):,} bytes)"
             )
             return video_bytes
     except Exception as e:
         logger.warning(f"[heygen] _create_broll_video_composite_from_video error: {e}")
+        return None
+
+
+def _trim_studio_clip(bg_video_bytes: bytes, duration_s: float) -> bytes | None:
+    """FFmpeg: loop the plain studio background (no PiP inset) to an exact duration —
+    used for timed-background windows where a segment has no b-roll of its own."""
+    ffmpeg = _get_ffmpeg_exe()
+    if not ffmpeg:
+        return None
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            bg_path  = tmp / "bg.mp4"
+            out_path = tmp / "trimmed.mp4"
+            bg_path.write_bytes(bg_video_bytes)
+            cmd = [
+                ffmpeg, "-y",
+                "-stream_loop", "-1", "-i", str(bg_path),
+                "-t", str(duration_s),
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                "-an",
+                str(out_path),
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=120)
+            if result.returncode != 0:
+                logger.warning(f"[heygen] _trim_studio_clip FFmpeg failed (rc={result.returncode}): "
+                               f"{result.stderr.decode(errors='replace')[-600:]}")
+                return None
+            return out_path.read_bytes()
+    except Exception as e:
+        logger.warning(f"[heygen] _trim_studio_clip error: {e}")
         return None
 
 
@@ -1218,6 +1280,28 @@ _V3_CHROMAKEY_POLL_INTERVAL_S = 30
 _V3_CHROMAKEY_MAX_POLL_ATTEMPTS = 60  # 30 minutes
 
 
+def _extract_heygen_failure_detail(data: dict) -> str:
+    """
+    Pull the real failure reason out of a HeyGen v3 status response. HeyGen's actual
+    failure fields are failure_code/failure_message — confirmed live 2026-07-28: a
+    render failed with failure_code="MOVIO_PAYMENT_INSUFFICIENT_CREDIT" and a specific
+    failure_message, even though the account's general balance (/v2/user/remaining_quota,
+    checked pre-flight in agents/anchor/agent.py) showed plenty of credits — HeyGen
+    apparently draws v3 avatar renders from a separate credit pool. error/msg were
+    checked first previously and are essentially always absent on v3 failures, which is
+    why every v3 render failure was logged as a useless "unknown" instead of this.
+    """
+    code = data.get("failure_code")
+    message = data.get("failure_message")
+    if code and message:
+        return f"{code}: {message}"
+    if message:
+        return message
+    if code:
+        return code
+    return data.get("error") or data.get("msg") or "unknown"
+
+
 def _poll_v3_video_sync(video_id: str) -> dict:
     """Blocking poll of a v3 video job until completed/failed/timeout. Returns the final `data` dict, or {"error": ...}."""
     time.sleep(15)
@@ -1236,7 +1320,7 @@ def _poll_v3_video_sync(video_id: str) -> dict:
             if status == "completed":
                 return data
             if status == "failed":
-                detail = data.get("error") or data.get("msg") or "unknown"
+                detail = _extract_heygen_failure_detail(data)
                 return {"error": f"HeyGen render failed: {detail}"}
         except Exception as e:
             logger.warning(f"[heygen-v3-chromakey] Poll error: {e}")
@@ -1324,6 +1408,167 @@ def _render_avatar_clip_v3_greenscreen(
         return dl.content, None
     except Exception as e:
         return None, f"Download error: {e}"
+
+
+def _allocate_broll_windows(
+    segments: list, total_duration_s: float, min_hold_s: float = _BROLL_MIN_HOLD_SECONDS,
+) -> list[dict]:
+    """
+    Turn the per-segment b-roll assignments into a sequence of on-screen time windows,
+    each at least min_hold_s long (so the PiP doesn't flash faster than a viewer can
+    register it — see the 2026-07-28 request to make b-roll switch "the same as a real
+    newscast", not per-topic-only).
+
+    Segment durations are estimated proportionally to word count against the actual
+    rendered clip length (total_duration_s) — HeyGen's v3 avatar endpoint concatenates
+    every segment into one continuous take with no per-segment timing info returned, so
+    word-count share of the real total is the best available proxy for a roughly-constant
+    TTS speaking rate. Not frame-accurate, but neither is a human editor's b-roll timing
+    in a real broadcast.
+
+    Consecutive segments are merged forward (keeping the first segment's b-roll for the
+    merged run) until the accumulated hold reaches min_hold_s. A too-short final window
+    is merged backward into the previous one instead, to avoid a last-second flash right
+    before the take ends.
+
+    Returns [{"start": float, "end": float, "image_url": str|None, "video_url": str|None}, ...]
+    in ascending time order, or [] if segments is empty.
+    """
+    if not segments or total_duration_s <= 0:
+        return []
+
+    word_counts = [max(1, len((s.get("script") or "").split())) for s in segments]
+    total_words = sum(word_counts) or 1
+    durations = [total_duration_s * wc / total_words for wc in word_counts]
+
+    windows: list[dict] = []
+    cursor = 0.0
+    i = 0
+    n = len(segments)
+    while i < n:
+        window_start = cursor
+        window_dur = durations[i]
+        j = i + 1
+        while window_dur < min_hold_s and j < n:
+            window_dur += durations[j]
+            j += 1
+        windows.append({
+            "start": window_start,
+            "end": window_start + window_dur,
+            "image_url": segments[i].get("image_url"),
+            "video_url": segments[i].get("video_url"),
+        })
+        cursor = window_start + window_dur
+        i = j
+
+    if len(windows) >= 2 and (windows[-1]["end"] - windows[-1]["start"]) < min_hold_s:
+        last = windows.pop()
+        windows[-1]["end"] = last["end"]
+
+    windows[-1]["end"] = total_duration_s  # absorb any floating-point drift
+    return windows
+
+
+def _build_v3_chromakey_timed_background(
+    segments: list,
+    background_asset_id: str,
+    bg_bytes_override: bytes | None,
+    pip_position: str,
+    total_duration_s: float,
+    min_hold_s: float = _BROLL_MIN_HOLD_SECONDS,
+) -> bytes | None:
+    """
+    Build a background video that switches its b-roll PiP inset over time, in sync with
+    which segment is (approximately) being spoken — restoring pip_v2's per-scene b-roll
+    switching for the v3-chromakey path, which is otherwise limited to a single
+    continuous background for the whole take (see _build_v3_chromakey_background).
+
+    Returns None on any failure (no ffmpeg, no windows worth building, concat failure) —
+    callers should fall back to _build_v3_chromakey_background's single-background
+    behavior, which is unaffected by this function's existence.
+    """
+    ffmpeg = _get_ffmpeg_exe()
+    if not ffmpeg:
+        return None
+
+    bg_bytes = bg_bytes_override or _get_background_video_bytes(background_asset_id)
+    if not bg_bytes:
+        return None
+
+    windows = _allocate_broll_windows(segments, total_duration_s, min_hold_s)
+    if len(windows) < 2:
+        return None  # nothing to switch between — let the caller use the simple path
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            chunk_paths: list[Path] = []
+
+            for idx, win in enumerate(windows):
+                dur = max(0.5, win["end"] - win["start"])
+                chunk_bytes = None
+                video_url = (win.get("video_url") or "").strip()
+                image_url = (win.get("image_url") or "").strip()
+
+                if video_url:
+                    broll_bytes = _download_broll_video(video_url)
+                    if broll_bytes:
+                        chunk_bytes = _create_broll_video_composite_from_video(
+                            broll_bytes, bg_bytes, pip_position=pip_position, duration_s=dur,
+                        )
+                elif image_url:
+                    try:
+                        r = requests.get(image_url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+                        if r.ok and r.content:
+                            chunk_bytes = _create_broll_video_composite(
+                                r.content, bg_bytes, pip_position=pip_position, duration_s=dur,
+                            )
+                    except Exception as e:
+                        logger.warning(f"[heygen-v3-chromakey] Timed b-roll image download failed: {e}")
+
+                if not chunk_bytes:
+                    chunk_bytes = _trim_studio_clip(bg_bytes, dur)
+                if not chunk_bytes:
+                    logger.warning(f"[heygen-v3-chromakey] Window {idx} produced no chunk — skipping")
+                    continue
+
+                chunk_path = tmp / f"chunk_{idx}.mp4"
+                chunk_path.write_bytes(chunk_bytes)
+                chunk_paths.append(chunk_path)
+
+            if not chunk_paths:
+                return None
+            if len(chunk_paths) == 1:
+                return chunk_paths[0].read_bytes()
+
+            list_path = tmp / "concat_list.txt"
+            list_path.write_text(
+                "\n".join(f"file '{p.as_posix()}'" for p in chunk_paths), encoding="utf-8",
+            )
+            out_path = tmp / "timed_bg.mp4"
+            cmd = [
+                ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(list_path),
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an",
+                str(out_path),
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=300)
+            if result.returncode != 0:
+                logger.warning(
+                    f"[heygen-v3-chromakey] Timed background concat failed (rc={result.returncode}): "
+                    f"{result.stderr.decode(errors='replace')[-800:]}"
+                )
+                return None
+
+            data = out_path.read_bytes()
+            logger.info(
+                f"[heygen-v3-chromakey] Timed background built: {len(windows)} window(s), "
+                f"{len(chunk_paths)} chunk(s), {len(data):,} bytes"
+            )
+            return data
+    except Exception as e:
+        logger.warning(f"[heygen-v3-chromakey] _build_v3_chromakey_timed_background error: {e}")
+        return None
 
 
 def _build_v3_chromakey_background(
@@ -1536,9 +1781,27 @@ def generate_video_multiscene_v3_chromakey(
     if err:
         return {"error": f"Greenscreen render failed: {err}", "video_id": None}
 
-    background_bytes = _build_v3_chromakey_background(
-        segments, background_asset_id, bg_bytes_override, pip_position
-    )
+    # Prefer a timed, per-segment-switching background (restores pip_v2-style b-roll
+    # variety) whenever there's more than one distinct b-roll item to switch between and
+    # we can measure the actual rendered clip length to time the switches against. Falls
+    # back to the single-continuous-background path — unchanged, still the default for
+    # single-b-roll or no-b-roll takes — on anything short of that.
+    distinct_broll = {
+        (seg.get("image_url") or seg.get("video_url"))
+        for seg in segments if seg.get("image_url") or seg.get("video_url")
+    }
+    background_bytes = None
+    if len(distinct_broll) >= 2:
+        clip_duration = _get_clip_duration_seconds(clip_bytes)
+        if clip_duration:
+            background_bytes = _build_v3_chromakey_timed_background(
+                segments, background_asset_id, bg_bytes_override, pip_position, clip_duration,
+            )
+
+    if not background_bytes:
+        background_bytes = _build_v3_chromakey_background(
+            segments, background_asset_id, bg_bytes_override, pip_position
+        )
     if not background_bytes:
         return {"error": "Could not build background video for chromakey composite", "video_id": None}
 

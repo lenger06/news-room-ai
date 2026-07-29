@@ -13,7 +13,7 @@ import requests
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from agents.registry import BaseAgent, AgentInfo
-from tools.heygen_tool import get_heygen_credits, generate_video_multiscene, generate_video_multiscene_v3, generate_video_multiscene_v3_chromakey, delete_heygen_asset, prepare_enhanced_background
+from tools.heygen_tool import get_heygen_credits, generate_video_multiscene, generate_video_multiscene_v3, generate_video_multiscene_v3_chromakey, delete_heygen_asset, prepare_enhanced_background, _extract_heygen_failure_detail
 from config.overlays import get_background_layers
 from config.anchors import get_look_by_avatar_id
 from config.settings import settings
@@ -402,15 +402,18 @@ class Agent(BaseAgent):
                 return {"error": f"HTTP {response.status_code}: {response.text[:200]}"}
             data = response.json().get("data", {})
             status = data.get("status", "unknown")
+            error_detail = None
             if status == "failed":
-                error_detail = data.get("error") or data.get("msg") or data.get("message") or response.text[:300]
+                error_detail = _extract_heygen_failure_detail(data)
+                if error_detail == "unknown":
+                    error_detail = response.text[:300] or "unknown"
                 logger.error(f"[heygen] Video {video_id} FAILED — detail: {error_detail}")
             return {
                 "video_id": video_id,
                 "status": status,
                 "video_url": data.get("video_url"),
                 "thumbnail_url": data.get("thumbnail_url"),
-                "error_detail": data.get("error") or data.get("msg"),
+                "error_detail": error_detail,
             }
         except Exception as e:
             logger.error(f"[heygen] status check error: {e}", exc_info=True)
@@ -441,7 +444,8 @@ class Agent(BaseAgent):
             if status == "completed":
                 return result
             if status == "failed":
-                return {"error": f"HeyGen video generation failed for {video_id}", "video_id": video_id}
+                detail = result.get("error_detail") or "unknown"
+                return {"error": f"HeyGen video generation failed for {video_id}: {detail}", "video_id": video_id}
 
             if attempt < MAX_POLL_ATTEMPTS:
                 logger.info(f"[heygen] Status '{status}', waiting {POLL_INTERVAL_SECONDS}s...")

@@ -19,7 +19,10 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from tools.heygen_tool import _chromakey_composite, _get_ffmpeg_exe, _FRAME_W, _FRAME_H
+from tools.heygen_tool import (
+    _chromakey_composite, _get_ffmpeg_exe, _FRAME_W, _FRAME_H,
+    _get_clip_duration_seconds, _build_v3_chromakey_timed_background,
+)
 
 _ffmpeg_available = _get_ffmpeg_exe() is not None
 
@@ -110,3 +113,63 @@ def test_chromakey_composite_left_position_shifts_overlay(tmp_path):
     )
     assert result is not None
     assert len(result) > 1000
+
+
+# ── 2026-07-28: timed, per-window b-roll switching (real FFmpeg) ───────────────
+
+@pytest.mark.skipif(not _ffmpeg_available, reason="FFmpeg not available in this environment")
+def test_get_clip_duration_seconds_real_ffmpeg(tmp_path):
+    clip_path = tmp_path / "clip.mp4"
+    _make_synthetic_clip(clip_path, color="navy", duration=3.0)
+    duration = _get_clip_duration_seconds(clip_path.read_bytes())
+    assert duration == pytest.approx(3.0, abs=0.2)
+
+
+@pytest.mark.skipif(not _ffmpeg_available, reason="FFmpeg not available in this environment")
+def test_build_v3_chromakey_timed_background_end_to_end_with_real_ffmpeg(tmp_path, monkeypatch):
+    """
+    Proves the per-window composite → concat pipeline actually runs against real
+    FFmpeg (the mocked tests in test_heygen_chromakey.py only check Python control
+    flow / call counts). Two windows, no network — image b-roll is faked as a
+    synthetic still frame written straight to disk and monkeypatched in place of a
+    Tavily/Pixabay download.
+    """
+    import requests as _requests
+
+    bg_path = tmp_path / "bg.mp4"
+    _make_synthetic_clip(bg_path, color="navy", duration=4.0)
+
+    from PIL import Image
+    img1 = tmp_path / "img1.jpg"
+    img2 = tmp_path / "img2.jpg"
+    Image.new("RGB", (320, 180), (200, 0, 0)).save(img1)
+    Image.new("RGB", (320, 180), (0, 0, 200)).save(img2)
+
+    class _FakeImgResp:
+        def __init__(self, content):
+            self.ok = True
+            self.content = content
+
+    def fake_get(url, timeout=None, headers=None):
+        return _FakeImgResp(img1.read_bytes() if "1" in url else img2.read_bytes())
+
+    monkeypatch.setattr(_requests, "get", fake_get)
+    import tools.heygen_tool as heygen_tool
+    monkeypatch.setattr(heygen_tool, "requests", _requests)
+
+    segments = [
+        {"script": " ".join(["word"] * 20), "image_url": "https://example.com/1.jpg"},
+        {"script": " ".join(["word"] * 20), "image_url": "https://example.com/2.jpg"},
+    ]
+
+    result = _build_v3_chromakey_timed_background(
+        segments, "unused-bg-id", bg_path.read_bytes(), "left",
+        total_duration_s=6.0, min_hold_s=2.0,
+    )
+
+    assert result is not None
+    assert len(result) > 1000
+    out_path = tmp_path / "timed_bg.mp4"
+    out_path.write_bytes(result)
+    duration = _get_clip_duration_seconds(result)
+    assert duration == pytest.approx(6.0, abs=1.0)

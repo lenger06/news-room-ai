@@ -15,7 +15,6 @@ from langchain_openai import ChatOpenAI
 from agents.registry import BaseAgent, AgentInfo
 from agents.editor.prompts import EDITOR_PROMPT
 from tools.web_research_tool import web_research_tool
-from tools.file_operations_tool import file_operations_tool
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -95,7 +94,14 @@ class Agent(BaseAgent):
 
     def __init__(self):
         self.llm = ChatOpenAI(model=settings.model_for("editor"), temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
-        self.tools = [web_research_tool, file_operations_tool]
+        # file_operations_tool intentionally NOT included: the full article text is
+        # already provided inline in this agent's context (=== WRITER OUTPUT === block),
+        # and the prompt never instructs it to read/write files. Log history across
+        # 2026-07-26 through 2026-07-28 shows zero legitimate uses — the one time the
+        # LLM invoked it anyway, it guessed the wrong filename (run-directory timestamp
+        # instead of the article's actual save timestamp, missing the .md extension),
+        # got a file-not-found error, and that confusion leaked into its response text.
+        self.tools = [web_research_tool]
         prompt = ChatPromptTemplate.from_messages([
             ("system", EDITOR_PROMPT),
             MessagesPlaceholder("chat_history", optional=True),

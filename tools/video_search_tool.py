@@ -1,6 +1,7 @@
 from langchain.tools import tool
 from typing import Optional
 import logging
+import re
 import requests
 import json
 from config.settings import settings
@@ -10,6 +11,31 @@ logger = logging.getLogger(__name__)
 # Pixabay offers a simple, free video API with direct CDN URLs that download
 # without any authorization headers — unlike Pexels whose CDN returns 403.
 _PIXABAY_VIDEO_URL = "https://pixabay.com/api/videos/"
+
+# Pixabay's video search matches on uploader-submitted tags, not actual video content
+# — and stock-footage tags are routinely stuffed with broad trending buzzwords to
+# maximize discoverability. Confirmed live 2026-07-28: a generic "space" stock clip
+# tagged "scientist, mars, planet, space, galaxy, universe, cosmos, astronomer,
+# astronomy, telescope, science, alien, nasa, astronautics, research, spacex, globe"
+# ranked in the top 2 results for the query "SpaceX Starship V3 launch and program
+# history" — sharing only the single word "spacex" — and the actual footage was an
+# unrelated aerial desert shot. Requiring 2+ overlapping significant words rejects
+# this kind of single-buzzword coincidence while still allowing genuinely on-topic
+# matches through.
+_STOPWORDS = {
+    "a", "an", "and", "the", "of", "in", "on", "for", "to", "with", "at", "by",
+    "is", "are", "was", "were", "from", "as", "its", "it", "this", "that",
+}
+_MIN_TAG_OVERLAP = 2
+
+
+def _significant_words(text: str) -> set[str]:
+    words = re.findall(r"[a-zA-Z]+", text.lower())
+    return {w for w in words if len(w) > 2 and w not in _STOPWORDS}
+
+
+def _tag_overlap_count(tags: str, query_words: set[str]) -> int:
+    return len(_significant_words(tags) & query_words)
 
 
 def _pick_resolution(video_hit: dict) -> dict | None:
@@ -52,14 +78,23 @@ def _video_search_impl(query: str, num_results: Optional[int] = 3) -> dict:
             return {"error": f"HTTP {response.status_code}", "videos": []}
 
         data = response.json()
+        query_words = _significant_words(query)
+        min_overlap = min(_MIN_TAG_OVERLAP, len(query_words)) if query_words else 0
+
         videos = []
         for hit in data.get("hits", []):
             chosen = _pick_resolution(hit)
             if not chosen:
                 continue
+            tags = hit.get("tags", "").strip() or query
+            if query_words and _tag_overlap_count(tags, query_words) < min_overlap:
+                logger.debug(
+                    f"[video_search_tool] Skipping low-relevance hit for {query!r} "
+                    f"(tags: {tags!r})"
+                )
+                continue
             raw_url = chosen.get("url", "")
             logger.debug(f"[video_search_tool] Pixabay raw URL: {raw_url}")
-            tags = hit.get("tags", "").strip() or query
             videos.append({
                 "url": raw_url,
                 "description": tags,
