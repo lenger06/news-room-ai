@@ -132,7 +132,13 @@ class Agent(BaseAgent):
             youtube = _get_youtube_service()
             media = MediaFileUpload(tmp_path, mimetype=mime_type)
             youtube.thumbnails().set(videoId=video_id, media_body=media).execute()
-            os.unlink(tmp_path)
+            # Cleanup happens after the real work is already done — a failure here (e.g.
+            # WinError 32, the temp file still briefly locked by AV scanning) must not be
+            # reported as a thumbnail failure when the thumbnail was actually set fine.
+            try:
+                os.unlink(tmp_path)
+            except OSError as cleanup_err:
+                logger.warning(f"[publisher] Could not delete temp thumbnail file {tmp_path}: {cleanup_err}")
             logger.info(f"[publisher] Thumbnail set for {video_id}")
             return {"success": True}
         except Exception as e:

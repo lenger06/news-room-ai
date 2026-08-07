@@ -179,7 +179,7 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Nicholas Stavros",
         avatars=[
-            AvatarLook("3581241b5df64bd9a331bebda862a637", "Blue Suit, Evening news, entertainment and lifestyle stories"),  # HeyGen: "Kurt" ⚠️ different actor than the on-air name
+            AvatarLook("3581241b5df64bd9a331bebda862a637", "Blue Suit, Evening news, entertainment and lifestyle stories", v3_supports_motion_prompt=False),  # HeyGen: "Kurt" ⚠️ different actor than the on-air name — confirmed live 2026-08-06: HeyGen HTTP 400 "motion_prompt requires a reference look to drive motion, and this avatar's [look wasn't trained with one]" — recurred 4x same day until fixed
 
             # AvatarLook("<avatar_id>", "standing in front of Capitol backdrop — election night and major votes"),
         ],

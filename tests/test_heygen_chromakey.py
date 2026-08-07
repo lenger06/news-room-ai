@@ -59,6 +59,15 @@ def test_green_wardrobe_look_uses_blue_key_color_instead_of_green():
     assert look.v3_key_color == "#0000FF"
 
 
+def test_nicholas_stavros_look_has_motion_prompt_disabled():
+    """Regression guard: confirmed live 2026-08-06 — this avatar ('Kurt') wasn't
+    trained with a motion-reference look, so HeyGen HTTP 400s any v3 render that
+    includes motion_prompt (recurred 4x the same day before this was set)."""
+    look = get_look_by_avatar_id("3581241b5df64bd9a331bebda862a637")  # Nicholas Stavros
+    assert look is not None
+    assert look.v3_supports_motion_prompt is False
+
+
 # ── tools/heygen_tool.py: _concatenate_segment_scripts ─────────────────────────
 
 def test_concatenate_segment_scripts_joins_and_collapses_whitespace():

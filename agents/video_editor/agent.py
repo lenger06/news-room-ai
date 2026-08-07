@@ -14,9 +14,8 @@ from langchain_openai import ChatOpenAI
 from agents.registry import BaseAgent, AgentInfo
 from agents.video_editor.prompts import VIDEO_EDITOR_PROMPT
 from tools.video_tools import (
-    download_video, extract_graphic_cues, save_video_package, assemble_final_video,
-    compose_foreground_layers, extract_graphic_cues_with_position, render_graphic_overlays,
-    check_visual_qa, _download_video_impl,
+    assemble_final_video, compose_foreground_layers, extract_graphic_cues_with_position,
+    render_graphic_overlays, check_visual_qa, _download_video_impl,
 )
 from tools.file_operations_tool import file_operations_tool
 from config.settings import settings
@@ -30,7 +29,17 @@ class Agent(BaseAgent):
 
     def __init__(self):
         self.llm = ChatOpenAI(model=settings.model_for("video_editor"), temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
-        self.tools = [download_video, extract_graphic_cues, save_video_package, file_operations_tool]
+        # download_video/save_video_package intentionally NOT included: the video download
+        # and video_package.json write are both fully deterministic now (see the 2026-08-02
+        # per-run MEDIA_DIR fix below) — giving the LLM its own copies of these tools meant
+        # it independently re-downloaded the video and re-saved the package to the OLD
+        # hardcoded ./output/media/ path from its prompt, which no longer matches the
+        # per-run directory the deterministic code uses. Confirmed live 2026-08-07: this
+        # silently discarded the LLM's own title/description/tags (written to the wrong,
+        # now-unread path) so YouTube uploads fell back to a bland topic-string title.
+        # extract_graphic_cues also dropped: the deterministic render_graphic_overlays path
+        # (Step 0 below) extracts cues itself and never consulted the LLM's copy.
+        self.tools = [file_operations_tool]
         prompt = ChatPromptTemplate.from_messages([
             ("system", VIDEO_EDITOR_PROMPT),
             MessagesPlaceholder("chat_history", optional=True),
@@ -50,6 +59,20 @@ class Agent(BaseAgent):
             module_path="agents.video_editor.agent",
             parent_agent="executive_producer",
         )
+
+    @staticmethod
+    def _parse_llm_metadata(text: str) -> dict:
+        """Extract the suggested title/description/tags JSON block from the LLM's
+        text response — it no longer writes anything to disk itself, so this is the
+        only way its suggestions reach video_package.json."""
+        for pattern in (r"```json\s*(\{.*?\})\s*```", r"```\s*(\{.*?\})\s*```", r"(\{[^{}]*\"title\"[^{}]*\})"):
+            m = re.search(pattern, text, re.DOTALL)
+            if m:
+                try:
+                    return json.loads(m.group(1))
+                except Exception:
+                    pass
+        return {}
 
     async def process_message(self, message: str, context: dict = None) -> dict:
         try:
@@ -88,10 +111,20 @@ class Agent(BaseAgent):
                     "agent": "video_editor",
                 }
 
+            # Per-run media directory (2026-08-02 incident): the EP passes this same
+            # MEDIA_DIR value to publisher too, which parses and uses it directly. This
+            # step used to ignore it entirely and always write to the global
+            # settings.MEDIA_DIR instead — a single shared path across every show/run —
+            # which meant publisher, looking in the correct per-run directory, would
+            # find nothing there. Never write to the global path again; the per-run
+            # directory is the single source of truth every step must agree on.
+            media_dir_match = re.search(r'MEDIA_DIR:\s*(\S+)', message, re.IGNORECASE)
+            media_dir = media_dir_match.group(1).strip() if media_dir_match else settings.MEDIA_DIR
+
             # Deterministically download the correct video for THIS run, with a fresh
             # timestamped filename — regardless of what the LLM tool-calling step below
             # does or doesn't manage to do.
-            downloaded_path_str = _download_video_impl(video_url)
+            downloaded_path_str = _download_video_impl(video_url, directory=media_dir)
             if downloaded_path_str.startswith("Error"):
                 logger.error(f"[video_editor] Deterministic download failed: {downloaded_path_str}")
                 return {
@@ -104,18 +137,20 @@ class Agent(BaseAgent):
             topic_m = re.search(r'TOPIC[:\s]+([^\n]+)', message, re.IGNORECASE)
             topic = topic_m.group(1).strip() if topic_m else ""
 
-            # Run the LLM tool-calling agent for the parts that genuinely benefit from
-            # its judgment (suggested title/description/tags, graphic cue extraction) —
-            # its output is used for metadata only now, never to decide which video file
-            # is correct.
+            # Run the LLM for the one thing it's still asked to do: suggest a YouTube
+            # title/description/tags. Its output is text-only now, parsed below — never
+            # a file it writes itself — so there's no path for it to get out of sync
+            # with the deterministic per-run directory this step actually uses.
             try:
                 result = self.executor.invoke({"input": message, "chat_history": []})
                 response_text = result.get("output", "")
             except Exception as e:
-                logger.warning(f"[video_editor] LLM tool-calling step failed (continuing with deterministic fallbacks): {e}")
+                logger.warning(f"[video_editor] LLM metadata step failed (continuing with deterministic fallbacks): {e}")
                 response_text = f"[LLM step failed: {e}]"
 
-            pkg_path = Path(settings.MEDIA_DIR) / "video_package.json"
+            llm_metadata = self._parse_llm_metadata(response_text)
+
+            pkg_path = Path(media_dir) / "video_package.json"
             pkg: dict = {}
             if pkg_path.exists():
                 try:
@@ -135,9 +170,9 @@ class Agent(BaseAgent):
                     logger.warning(f"[video_editor] Could not read existing video_package.json: {e}")
 
             pkg.setdefault("topic", topic)
-            pkg.setdefault("title", topic or "News Segment")
-            pkg.setdefault("description", topic or "")
-            pkg.setdefault("tags", [])
+            pkg.setdefault("title", llm_metadata.get("title") or topic or "News Segment")
+            pkg.setdefault("description", llm_metadata.get("description") or topic or "")
+            pkg.setdefault("tags", llm_metadata.get("tags") or [])
             pkg.setdefault("graphic_cues", [])
             # Always authoritative, regardless of the LLM's own tool call above.
             pkg["video_file"] = str(broadcast_path)
@@ -203,7 +238,7 @@ class Agent(BaseAgent):
                             topic=topic,
                             reason=f"Visual QA flag: {qa_result.get('notes', '')}",
                             stage="visual_qa",
-                            output_dir=str(Path(settings.MEDIA_DIR).parent),
+                            output_dir=str(Path(media_dir).parent),
                             workflow="",
                         )
                         logger.warning(f"[video_editor] Visual QA flagged: {qa_result.get('notes', '')[:200]}")

@@ -10,7 +10,6 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_openai import ChatOpenAI
 from agents.registry import BaseAgent, AgentInfo
 from agents.producer.prompts import PRODUCER_PROMPT
-from tools.file_operations_tool import file_operations_tool
 from config.settings import settings
 import logging
 
@@ -22,7 +21,14 @@ class Agent(BaseAgent):
 
     def __init__(self):
         self.llm = ChatOpenAI(model=settings.model_for("producer"), temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
-        self.tools = [file_operations_tool]
+        # file_operations_tool intentionally NOT included: every path Producer needs to
+        # report is already stated in the Writer/Script Writer outputs already in its
+        # context. Confirmed live 2026-08-07: given the tool, the LLM used it to
+        # independently "confirm" files exist via a guessed/default directory (per the
+        # tool's own docstring default, ./output/articles) instead of trusting the paths
+        # already in context — reporting real, successfully-saved files as "not
+        # available" once per-run directories stopped matching that guessed default.
+        self.tools = []
         prompt = ChatPromptTemplate.from_messages([
             ("system", PRODUCER_PROMPT),
             MessagesPlaceholder("chat_history", optional=True),
