@@ -5,8 +5,7 @@ project_root = Path(__file__).parent.parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from langchain.agents import create_openai_functions_agent, AgentExecutor
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from agents.registry import BaseAgent, AgentInfo
 from agents.producer.prompts import PRODUCER_PROMPT
@@ -17,26 +16,18 @@ logger = logging.getLogger(__name__)
 
 
 class Agent(BaseAgent):
-    """Producer — final production step: file management and (future) YouTube upload."""
+    """Producer — final production step: summarizes the run from context already provided."""
 
     def __init__(self):
         self.llm = ChatOpenAI(model=settings.model_for("producer"), temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
-        # file_operations_tool intentionally NOT included: every path Producer needs to
-        # report is already stated in the Writer/Script Writer outputs already in its
-        # context. Confirmed live 2026-08-07: given the tool, the LLM used it to
-        # independently "confirm" files exist via a guessed/default directory (per the
-        # tool's own docstring default, ./output/articles) instead of trusting the paths
-        # already in context — reporting real, successfully-saved files as "not
-        # available" once per-run directories stopped matching that guessed default.
-        self.tools = []
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", PRODUCER_PROMPT),
-            MessagesPlaceholder("chat_history", optional=True),
-            ("human", "{input}"),
-            MessagesPlaceholder("agent_scratchpad"),
-        ])
-        agent = create_openai_functions_agent(self.llm, self.tools, prompt)
-        self.executor = AgentExecutor(agent=agent, tools=self.tools, verbose=True, max_iterations=6)
+        # Plain LLM call, not a tool-calling AgentExecutor: Producer genuinely needs no
+        # tools (every path it reports is already in the Writer/Script Writer outputs
+        # in its context — see agents/producer/prompts.py). Confirmed live 2026-08-08:
+        # create_openai_functions_agent with an empty tools list still sends an empty
+        # `functions` array to the OpenAI API, which rejects it outright
+        # (invalid_request_error: "Invalid 'functions': empty array") — broke every
+        # single run. A direct chat call has no `functions` parameter to omit or empty
+        # out, so this class of bug isn't reachable here.
         logger.info("Producer agent initialized")
 
     def get_info(self) -> AgentInfo:
@@ -51,8 +42,11 @@ class Agent(BaseAgent):
 
     async def process_message(self, message: str, context: dict = None) -> dict:
         try:
-            result = self.executor.invoke({"input": message, "chat_history": []})
-            return {"success": True, "response": result.get("output", ""), "agent": "producer"}
+            response = self.llm.invoke([
+                SystemMessage(content=PRODUCER_PROMPT),
+                HumanMessage(content=message),
+            ])
+            return {"success": True, "response": response.content, "agent": "producer"}
         except Exception as e:
             logger.error(f"Producer error: {e}", exc_info=True)
             return {"success": False, "response": f"Production failed: {str(e)}", "agent": "producer"}

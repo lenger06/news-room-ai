@@ -1329,23 +1329,22 @@ def _poll_v3_video_sync(video_id: str) -> dict:
     return {"error": f"Timed out waiting for video {video_id}"}
 
 
-def _render_avatar_clip_v3_greenscreen(
+_MOTION_PROMPT_UNSUPPORTED_MARKER = "motion_prompt requires a reference look"
+
+
+def _submit_v3_avatar_render(
     full_script: str,
     avatar_id: str,
     voice_id: str,
     engine: str,
     key_color: str,
-    supports_motion_prompt: bool,
+    include_motion_prompt: bool,
     supports_remove_background: bool,
     fit: str | None,
     motion_prompt: str,
     title: str,
-) -> tuple[bytes | None, str | None]:
-    """
-    Submit + poll + download a single-scene v3 avatar clip against a solid
-    chromakey-color background. Returns (clip_bytes, error) — clip_bytes is
-    None on any failure, with error set to a human-readable message.
-    """
+) -> tuple[str | None, str, str | None]:
+    """Submit one v3 avatar render attempt. Returns (video_id, raw_response_text, error)."""
     payload: dict = {
         "type": "avatar",
         "avatar_id": avatar_id,
@@ -1367,14 +1366,14 @@ def _render_avatar_clip_v3_greenscreen(
         # (also confirmed live 2026-07-27, Shawn Green/Brandon Jones).
         # See HEYGEN_V3_MIGRATION_PLAN.md sec 4a.
         payload["remove_background"] = True
-    if supports_motion_prompt:
+    if include_motion_prompt:
         payload["motion_prompt"] = motion_prompt
     if fit:
         payload["fit"] = fit
 
     logger.info(
         f"[heygen-v3-chromakey] Submitting greenscreen avatar payload "
-        f"({len(full_script)} chars, engine={engine}, fit={fit!r})"
+        f"({len(full_script)} chars, engine={engine}, fit={fit!r}, motion_prompt={include_motion_prompt})"
     )
 
     try:
@@ -1384,13 +1383,57 @@ def _render_avatar_clip_v3_greenscreen(
             json=payload, timeout=60,
         )
         if not resp.ok:
-            return None, f"HeyGen v3 HTTP {resp.status_code}: {resp.text[:200]}"
+            return None, resp.text, f"HeyGen v3 HTTP {resp.status_code}: {resp.text[:200]}"
         data = resp.json().get("data", {})
         video_id = data.get("video_id") or data.get("id")
         if not video_id:
-            return None, f"No video_id in HeyGen response: {resp.text[:200]}"
+            return None, resp.text, f"No video_id in HeyGen response: {resp.text[:200]}"
+        return video_id, resp.text, None
     except Exception as e:
-        return None, f"Submit error: {e}"
+        return None, "", f"Submit error: {e}"
+
+
+def _render_avatar_clip_v3_greenscreen(
+    full_script: str,
+    avatar_id: str,
+    voice_id: str,
+    engine: str,
+    key_color: str,
+    supports_motion_prompt: bool,
+    supports_remove_background: bool,
+    fit: str | None,
+    motion_prompt: str,
+    title: str,
+) -> tuple[bytes | None, str | None]:
+    """
+    Submit + poll + download a single-scene v3 avatar clip against a solid
+    chromakey-color background. Returns (clip_bytes, error) — clip_bytes is
+    None on any failure, with error set to a human-readable message.
+    """
+    video_id, raw_text, err = _submit_v3_avatar_render(
+        full_script, avatar_id, voice_id, engine, key_color, supports_motion_prompt,
+        supports_remove_background, fit, motion_prompt, title,
+    )
+
+    if err and supports_motion_prompt and _MOTION_PROMPT_UNSUPPORTED_MARKER in raw_text:
+        # This avatar/look was never trained with a motion-reference clip, so v3
+        # rejects motion_prompt outright — confirmed live 2026-08-07 for two
+        # different avatars (Nicholas Stavros, Alexa Chen), neither individually
+        # validated before their first real render. Rather than requiring every
+        # untested avatar in the roster to fail once and get a manual config patch
+        # (config/anchors.py's v3_supports_motion_prompt), retry once without it —
+        # self-healing for this specific, unambiguous rejection reason only.
+        logger.warning(
+            f"[heygen-v3-chromakey] avatar={avatar_id} rejected motion_prompt (no "
+            f"reference look trained) — retrying once without it"
+        )
+        video_id, raw_text, err = _submit_v3_avatar_render(
+            full_script, avatar_id, voice_id, engine, key_color, False,
+            supports_remove_background, fit, motion_prompt, title,
+        )
+
+    if err:
+        return None, err
 
     result = _poll_v3_video_sync(video_id)
     if "error" in result:

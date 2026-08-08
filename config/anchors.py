@@ -120,7 +120,7 @@ ANCHORS: list[Anchor] = [
     Anchor(
         name="Alexa Chen", # Alexa
         avatars=[
-            AvatarLook("a5454d8b999d4e5f87f486605465aae4", "Informal sweater , Entertainment news, entertainment and lifestyle stories"),  # HeyGen: "Alexa"
+            AvatarLook("a5454d8b999d4e5f87f486605465aae4", "Informal sweater , Entertainment news, entertainment and lifestyle stories", v3_supports_motion_prompt=False),  # HeyGen: "Alexa" — confirmed live 2026-08-07: same HTTP 400 "motion_prompt requires a reference look" as Nicholas Stavros; auto-retry in tools/heygen_tool.py would also catch this, but flagging it here avoids the wasted round-trip
             # AvatarLook("<avatar_id>", "standing in front of Capitol backdrop — election night and major votes"),
         ],
         voice_id="8901bf9a88a24f7c8b22bfe28e4bcc5b",

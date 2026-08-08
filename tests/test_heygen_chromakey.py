@@ -68,6 +68,15 @@ def test_nicholas_stavros_look_has_motion_prompt_disabled():
     assert look.v3_supports_motion_prompt is False
 
 
+def test_alexa_chen_look_has_motion_prompt_disabled():
+    """Regression guard: confirmed live 2026-08-07 — same HTTP 400 as Nicholas
+    Stavros ('motion_prompt requires a reference look'), a different avatar hitting
+    the same never-validated-before-first-use gap."""
+    look = get_look_by_avatar_id("a5454d8b999d4e5f87f486605465aae4")  # Alexa Chen
+    assert look is not None
+    assert look.v3_supports_motion_prompt is False
+
+
 # ── tools/heygen_tool.py: _concatenate_segment_scripts ─────────────────────────
 
 def test_concatenate_segment_scripts_joins_and_collapses_whitespace():
@@ -449,6 +458,98 @@ def test_render_avatar_clip_v3_greenscreen_omits_remove_background_when_unsuppor
 
     assert "remove_background" not in captured_payload
     assert captured_payload["background"] == {"type": "color", "value": "#00FF00"}
+
+
+def test_render_avatar_clip_v3_greenscreen_retries_without_motion_prompt_on_rejection(monkeypatch):
+    """Regression/feature guard for the 2026-08-07 incident: two different avatars
+    (Nicholas Stavros, Alexa Chen), neither individually validated before their first
+    real render, both got HTTP 400 'motion_prompt requires a reference look' — rather
+    than requiring a manual config patch per avatar as each is discovered, this must
+    self-heal by retrying once without motion_prompt."""
+    call_payloads = []
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        call_payloads.append(json)
+        if "motion_prompt" in json:
+            return _FakeResp(
+                ok=False, status_code=400,
+                text='{"error":{"code":"invalid_parameter","message":'
+                     '"motion_prompt requires a reference look to drive motion, '
+                     'and this avatar has none"}}',
+            )
+        return _FakeResp(json_data={"data": {"video_id": "vid123"}})
+
+    def fake_get(url, headers=None, timeout=None):
+        if "v3/videos/" in url:
+            return _FakeResp(json_data={"data": {"status": "completed", "video_url": "https://cdn/x.mp4"}})
+        return _FakeResp()  # the final clip download
+
+    monkeypatch.setattr(heygen_tool.requests, "post", fake_post)
+    monkeypatch.setattr(heygen_tool.requests, "get", fake_get)
+    monkeypatch.setattr(heygen_tool.time, "sleep", lambda s: None)
+    monkeypatch.setattr(heygen_tool.settings, "HEYGEN_API_KEY", "fake-key")
+
+    clip_bytes, err = heygen_tool._render_avatar_clip_v3_greenscreen(
+        "script text", "avatar-id", "voice-id", "avatar_v", "#00FF00",
+        supports_motion_prompt=True, supports_remove_background=True, fit=None,
+        motion_prompt="Professional broadcast news anchor.", title="Title",
+    )
+
+    assert err is None
+    assert clip_bytes == b"downloaded-clip-bytes"
+    assert len(call_payloads) == 2
+    assert "motion_prompt" in call_payloads[0]
+    assert "motion_prompt" not in call_payloads[1]
+
+
+def test_render_avatar_clip_v3_greenscreen_does_not_retry_when_motion_prompt_already_disabled(monkeypatch):
+    call_payloads = []
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        call_payloads.append(json)
+        return _FakeResp(
+            ok=False, status_code=400,
+            text='{"error":{"code":"invalid_parameter","message":"some unrelated problem"}}',
+        )
+
+    monkeypatch.setattr(heygen_tool.requests, "post", fake_post)
+    monkeypatch.setattr(heygen_tool.settings, "HEYGEN_API_KEY", "fake-key")
+
+    clip_bytes, err = heygen_tool._render_avatar_clip_v3_greenscreen(
+        "script text", "avatar-id", "voice-id", "avatar_iii", "#00FF00",
+        supports_motion_prompt=False, supports_remove_background=False, fit="contain",
+        motion_prompt="unused", title="Title",
+    )
+
+    assert clip_bytes is None
+    assert "some unrelated problem" in err
+    assert len(call_payloads) == 1
+
+
+def test_render_avatar_clip_v3_greenscreen_does_not_retry_on_unrelated_400(monkeypatch):
+    """A 400 for a different reason must not trigger the motion_prompt retry — only
+    this specific, unambiguous rejection message should."""
+    call_payloads = []
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        call_payloads.append(json)
+        return _FakeResp(
+            ok=False, status_code=400,
+            text='{"error":{"code":"invalid_parameter","message":"script exceeds max length"}}',
+        )
+
+    monkeypatch.setattr(heygen_tool.requests, "post", fake_post)
+    monkeypatch.setattr(heygen_tool.settings, "HEYGEN_API_KEY", "fake-key")
+
+    clip_bytes, err = heygen_tool._render_avatar_clip_v3_greenscreen(
+        "script text", "avatar-id", "voice-id", "avatar_v", "#00FF00",
+        supports_motion_prompt=True, supports_remove_background=True, fit=None,
+        motion_prompt="motion", title="Title",
+    )
+
+    assert clip_bytes is None
+    assert "script exceeds max length" in err
+    assert len(call_payloads) == 1
 
 
 def test_render_avatar_clip_v3_greenscreen_returns_error_on_failed_status(monkeypatch):
